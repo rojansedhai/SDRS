@@ -35,7 +35,7 @@ export const handler = async (event) => {
 
   // Strictly bind target resources to environment variables
   const targetLambda = process.env.EVENT_PROCESSOR_FUNCTION_NAME;
-  const targetRule = process.env.EVENT_BRIDGE_RULE_NAME;
+  const targetRule = process.env.EVENT_BRIDGE_RULE_NAME ? process.env.EVENT_BRIDGE_RULE_NAME.split('|').pop() : '';
   const targetBus = process.env.EVENT_BUS_NAME;
   const targetMappingUuid = process.env.SQS_EVENT_SOURCE_MAPPING_UUID;
 
