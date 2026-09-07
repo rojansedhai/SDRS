@@ -7,7 +7,7 @@ An open-source, interactive web application that helps developers understand how
 ![React](https://img.shields.io/badge/React-18-61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6)
 ![Node](https://img.shields.io/badge/Node.js-22.x-green)
-![Tests](https://img.shields.io/badge/Tests-31%20Passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-59%20Passing-brightgreen)
 
 > 📘 Read the full **[VALIDATION_REPORT.md](./VALIDATION_REPORT.md)** for our complete technical compliance audit, bug-fix log, and test results.  
 > 🌐 Read the comprehensive **[docs/MULTI_REGION.md](./docs/MULTI_REGION.md)** for Multi-Region Disaster Recovery architecture, runbooks, and Route 53 failover mechanics.  
@@ -109,7 +109,7 @@ npm --prefix backend install
 # Start development server (Demo Mode enabled by default)
 npm --prefix frontend run dev
 ```
-Open **http://localhost:3000** or **http://localhost:5173** in your browser (both work so choose any you want).
+Open **http://localhost:3000** in your browser (default configured port; API Gateway CORS also permits `5173`).
 
 ---
 
@@ -117,7 +117,7 @@ Open **http://localhost:3000** or **http://localhost:5173** in your browser (bot
 
 Run the automated test suite locally:
 ```bash
-# Run unit & calculation tests (14/14 tests)
+# Run unit, calculation & security invariant tests (59/59 tests pass)
 npm test
 
 # Run offline smoke test script (PowerShell)
@@ -151,24 +151,24 @@ chmod +x scripts/deploy-multi-region.sh
 ```
 
 4. **Configure Frontend:**
-Edit `frontend/.env`:
+Copy `frontend/.env.example` to `frontend/.env`:
 ```env
 VITE_DEMO_MODE=false
 VITE_API_URL=https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com
-VITE_API_KEY=your-api-key-here
 ```
+*(Note: Protected API routes enforce Amazon Cognito JWT Bearer tokens via API Gateway HTTP API JWT Authorizer. When running live, acquire a JWT token via Cognito User Pool or run in Demo Mode for full offline simulation).*
 
 5. **Run Live Smoke Test against AWS:**
 ```bash
-# PowerShell:
+# PowerShell (with acquired Cognito JWT token):
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1 `
   -ApiUrl "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com" `
-  -ApiKey "your-api-key-here"
+  -BearerToken "$JwtToken"
 
-# Bash:
+# Linux/macOS Bash:
 ./scripts/smoke-test.sh \
   --api-url "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com" \
-  --api-key "your-api-key-here"
+  --bearer-token "$JwtToken"
 ```
 
 6. **Start the Frontend:**
@@ -215,13 +215,26 @@ sam delete --stack-name sdrs-stack --region us-east-1 --no-prompts
 ```
 
 #### Multi-Region Cleanup `[Phase 2]`:
+Use the automated cleanup script to cleanly delete all stacks in proper reverse-dependency order:
+```powershell
+# PowerShell:
+.\scripts\cleanup.ps1 -PrimaryRegion us-east-1 -SecondaryRegion us-west-2
+```
 ```bash
-# Delete regional application stacks first
-sam delete --stack-name sdrs-primary-stack --region us-east-1 --no-prompts
-sam delete --stack-name sdrs-secondary-stack --region us-west-2 --no-prompts
+# Linux/macOS Bash:
+./scripts/cleanup.sh --primary-region us-east-1 --secondary-region us-west-2
+```
 
-# Delete multi-region global resources
-sam delete --stack-name sdrs-multiregion-globals --region us-east-1 --no-prompts
+Or manually delete via AWS SAM CLI in reverse dependency order:
+```bash
+# 1. Delete Secondary Application Stack
+sam delete --stack-name sdrs-secondary --region us-west-2 --no-prompts
+
+# 2. Delete Primary Application Stack
+sam delete --stack-name sdrs-primary --region us-east-1 --no-prompts
+
+# 3. Delete Multi-Region Storage Orchestrator (Global Tables & Cognito)
+sam delete --stack-name sdrs-multiregion-orchestrator --region us-east-1 --no-prompts
 ```
 
 ---

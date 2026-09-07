@@ -168,14 +168,25 @@ Running a two-region active-passive architecture incurs slight operational overh
 ```
 
 ### Complete Teardown & Destruction
+Run the automated cleanup script to cleanly remove all multi-region stacks in proper reverse-dependency order with interactive confirmation:
+```powershell
+# Windows PowerShell:
+.\scripts\cleanup.ps1 -PrimaryRegion us-east-1 -SecondaryRegion us-west-2
+```
 ```bash
-# 1. Delete Primary Stack
-sam delete --stack-name sdrs-primary --region us-east-1 --no-prompts
+# Linux/macOS Bash:
+./scripts/cleanup.sh --primary-region us-east-1 --secondary-region us-west-2
+```
 
-# 2. Delete Secondary Stack
+Or delete manually via SAM CLI in reverse dependency order:
+```bash
+# 1. Delete Secondary Application Stack
 sam delete --stack-name sdrs-secondary --region us-west-2 --no-prompts
 
-# 3. Delete Global Orchestrator
+# 2. Delete Primary Application Stack
+sam delete --stack-name sdrs-primary --region us-east-1 --no-prompts
+
+# 3. Delete Global Storage Orchestrator (Global Tables & Cognito)
 sam delete --stack-name sdrs-multiregion-orchestrator --region us-east-1 --no-prompts
 ```
 

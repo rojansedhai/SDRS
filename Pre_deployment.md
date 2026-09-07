@@ -1,193 +1,182 @@
-1. Pre-Deployment Security & Billing Guardrails
-Before running any deploy commands, configure these safety measures:
+# 🛡️ SDRS — Pre-Deployment Security & Billing Guardrails
 
-A. Set an AWS Budget ($5.00 Threshold)
-To guarantee you will never receive an unexpected bill, create a budget alert:
+Before executing any deployment commands against live AWS, configure these essential safety measures and review operational guardrails.
 
-Open the AWS Console 
-→
-→ Search for AWS Budgets.
-Click Create budget 
-→
-→ Choose Zero spend budget or Cost budget set to $5.00.
-Enter your email address to receive immediate alerts if your account incurs charges.
-B. Use an IAM Sandbox User / Role (Never Root)
-Never deploy using your AWS root credentials.
-Use an IAM User or temporary AWS SSO credentials with Administrator access in a sandbox/development account.
-C. Restrict API Gateway CORS to Localhost
-Currently in backend/template.yaml, CORS origins are set to *. Before deploying to AWS, restrict it so only your local frontend can invoke your backend: In 
-backend/template.yaml
-:
+---
 
-yaml
+## 1. Safety Guardrails & Billing Protection
 
+### A. Set an AWS Budget ($5.00 Threshold)
+To guarantee that you will never incur unexpected cloud expenses, create an immediate budget alert:
+1. Open the **AWS Console** → Search for **AWS Budgets**.
+2. Click **Create budget** → Choose **Zero spend budget** or **Cost budget** set to **$5.00 USD**.
+3. Configure your email address to receive real-time threshold notifications.
 
-  SimulatorApi:
-    Type: AWS::Serverless::HttpApi
-    Properties:
-      CorsConfiguration:
-        AllowOrigins:
-          - "http://localhost:5173"
-          - "http://127.0.0.1:5173"
-        AllowMethods:
-          - "GET"
-          - "POST"
-          - "OPTIONS"
-        AllowHeaders:
-          - "Content-Type"
-          - "x-api-key"
-2. How to Deploy to AWS Securely
-You can deploy either in Single-Region (Recommended for initial validation) or Multi-Region (Phase 2).
+### B. Use an IAM Sandbox User or Temporary SSO Role (Never Root)
+* Never deploy infrastructure using AWS Root Account credentials.
+* Use a development IAM user or temporary AWS IAM Identity Center (SSO) credentials with administrator or scoped deployment permissions in a sandbox account.
 
-Option A: Single-Region Deployment (us-east-1)
-Step 1: Verify Prerequisites
-Ensure AWS CLI and AWS SAM CLI are installed and configured:
+### C. Pre-Configured Localhost CORS Lockdown (SEC-03)
+In `backend/template.yaml`, production CORS is pre-configured to strictly allow requests originating from your local development ports:
+```yaml
+SimulatorApi:
+  Type: AWS::Serverless::HttpApi
+  Properties:
+    CorsConfiguration:
+      AllowOrigins:
+        - "http://localhost:3000"
+        - "http://localhost:5173"
+        - "http://127.0.0.1:3000"
+        - "http://127.0.0.1:5173"
+      AllowMethods:
+        - "GET"
+        - "POST"
+        - "OPTIONS"
+      AllowHeaders:
+        - "Content-Type"
+        - "Authorization"
+```
+No manual CORS modification is necessary prior to deployment.
 
-powershell
+---
 
+## 2. How to Deploy to AWS Securely
 
+You can deploy in either **Single-Region** (for simple evaluation) or **Multi-Region** (for Route 53 failover and DynamoDB Global Tables).
+
+### Option A: Single-Region Deployment (`us-east-1`)
+
+#### Step 1: Verify Prerequisites
+Ensure the AWS CLI v2 and AWS SAM CLI are installed and configured:
+```powershell
 aws sts get-caller-identity
 sam --version
-Step 2: Deploy Backend Stack via SAM
+```
+
+#### Step 2: Deploy Backend Stack via SAM
 Run the deployment script from the project root in PowerShell:
-
-powershell
-
-
+```powershell
 .\scripts\deploy.ps1 -StackName "sdrs-stack" -Region "us-east-1"
+```
+
 Or execute manually via SAM CLI:
-
-powershell
-
-
+```powershell
 cd backend
 sam build
 sam deploy `
-    --stack-name "sdrs-stack" `
-    --region "us-east-1" `
-    --resolve-s3 `
-    --capabilities CAPABILITY_IAM `
-    --no-confirm-changeset
-Step 3: Connect the Frontend
-When the SAM deployment finishes, the terminal will print your API Gateway URL:
+    --stack-name "sdrs-stack"     --region "us-east-1"     --resolve-s3     --capabilities CAPABILITY_IAM     --no-confirm-changeset
+```
 
-text
-
-
+#### Step 3: Connect the Frontend
+When the SAM deployment completes, the terminal will print your API Gateway URL:
+```text
 API Gateway URL: https://<api-id>.execute-api.us-east-1.amazonaws.com/
-Update your frontend environment file 
-frontend/.env
-:
+```
 
-ini
-
-
+Update your frontend environment file by copying the template:
+```powershell
+Copy-Item frontend\.env.example frontend\.env
+```
+Set your deployed endpoint in `frontend/.env`:
+```ini
 VITE_DEMO_MODE=false
 VITE_API_URL=https://<api-id>.execute-api.us-east-1.amazonaws.com
+```
+
 Then start the frontend:
-
-powershell
-
-
-cd ../frontend
+```powershell
+cd frontend
 npm run dev
-Open http://localhost:5173. The dashboard badge will now read ☁️ Live AWS Deployment instead of Demo Sandbox.
+```
+Open **http://localhost:3000**. The dashboard badge will reflect ☁️ **Live AWS Deployment**.
 
-Option B: Multi-Region Deployment (us-east-1 + us-west-2)
-If you want to test Route 53 failover and DynamoDB Global Tables:
+---
 
-powershell
+### Option B: Multi-Region Deployment (`us-east-1` + `us-west-2`)
 
+To evaluate active-passive Route 53 DNS failover and DynamoDB Global Tables:
+```powershell
+.\scripts\deploy-multi-region.ps1 -PrimaryRegion us-east-1 -SecondaryRegion us-west-2
+```
 
-.\scripts\deploy-multi-region.ps1 -PrimaryRegion us-east-1 -SecondaryRegion us-west-2 -StackNamePrefix "sdrs"
-This provisions:
+This automatically provisions:
+1. `sdrs-multiregion-orchestrator` (Authoritative DynamoDB Global Tables & Cognito User Pool in `us-east-1`)
+2. `sdrs-primary` (Primary regional application stack in `us-east-1`)
+3. `sdrs-secondary` (Standby regional application stack in `us-west-2`)
 
-sdrs-primary in us-east-1
-sdrs-secondary in us-west-2
-sdrs-multiregion-orchestrator (DynamoDB Global Tables and Route 53 health check probe)
-3. What You Will Be Billed During Testing
-All resources are configured as Serverless On-Demand:
+---
 
-API Gateway HTTP API: $1.00 per 1M calls (first 300 requests = $0.0003)
-AWS Lambda (ARM64 Graviton): 1 million free invocations/month; $0.20 per 1M thereafter
-Amazon SQS: First 1 million requests/month are free
-DynamoDB: On-demand pay-per-request (first 25 RCU/WCU are free under AWS Free Tier)
-Route 53 Health Check (Multi-region only): $0.50/month (prorated by hour: ~$0.0007 per hour)
-NOTE
+## 3. Estimated AWS Resource Billing During Testing
 
-Total Expected Cost: Running an experiment generating 2,000–5,000 events costs less than $0.02. When you stop testing and the system is idle, your ongoing compute and queue cost is $0.00.
+All resources are provisioned on Serverless On-Demand pricing:
+- **API Gateway HTTP API**: $1.00 per 1M calls (first 300 test requests = ~$0.0003)
+- **AWS Lambda (ARM64 Graviton)**: 1M free invocations/month under AWS Free Tier; $0.20 per 1M thereafter
+- **Amazon SQS**: First 1M requests/month free
+- **DynamoDB On-Demand**: Free tier covers first 25 RCU/WCU; pay-per-request thereafter
+- **Route 53 Health Check (Multi-region only)**: ~$0.50/month prorated (~$0.0007 per hour while active)
 
-4. How to Delete Everything (Ensure $0.00 Ongoing Cost)
-Once your testing is complete, run these commands to cleanly remove all resources so no lingering fees can accumulate:
+> 💡 **Total Expected Cost:** Running an experiment generating 2,000–5,000 events costs **less than $0.02**. When the experiment is stopped and idle, ongoing compute cost is **$0.00**.
 
-Step 1: Delete CloudFormation Stacks
-If you deployed Single-Region:
-powershell
+---
 
+## 4. How to Delete Everything (Ensure $0.00 Ongoing Cost)
 
-# Using the cleanup script:
-.\scripts\cleanup.ps1 -StackName "sdrs-stack" -Region "us-east-1"
-# Or directly using SAM CLI:
-sam delete --stack-name sdrs-stack --region us-east-1 --no-prompts
-If you deployed Multi-Region:
-Delete the stacks in reverse order:
+When testing is complete, clean up all resources to guarantee zero ongoing charges:
 
-powershell
+### Step 1: Delete CloudFormation Stacks
 
+#### Multi-Region Cleanup (Automated):
+Run the automated teardown script, which deletes all multi-region stacks in proper reverse-dependency order with interactive confirmation:
+```powershell
+.\scripts\cleanup.ps1 -PrimaryRegion us-east-1 -SecondaryRegion us-west-2
+```
+*(On Linux/macOS: `./scripts/cleanup.sh --primary-region us-east-1 --secondary-region us-west-2`)*
 
-# 1. Delete Multi-Region Orchestrator (Global Tables & Route 53 health checks)
-sam delete --stack-name sdrs-multiregion-orchestrator --region us-east-1 --no-prompts
-# 2. Delete Secondary Regional Stack
+#### Multi-Region Cleanup (Manual via SAM CLI):
+If deleting manually, strictly follow reverse dependency order:
+```powershell
+# 1. Delete Secondary Regional Application Stack
 sam delete --stack-name sdrs-secondary --region us-west-2 --no-prompts
-# 3. Delete Primary Regional Stack
+
+# 2. Delete Primary Regional Application Stack
 sam delete --stack-name sdrs-primary --region us-east-1 --no-prompts
-Step 2: Delete the SAM S3 Deployment Bucket (Avoid Storage Fees)
-When you run sam deploy --resolve-s3, AWS creates an S3 bucket to hold your Lambda zip files (named aws-sam-cli-managed-default-samclisourcebucket-...).
 
-To find and delete it:
+# 3. Delete Multi-Region Storage Orchestrator (Global Tables & Cognito)
+sam delete --stack-name sdrs-multiregion-orchestrator --region us-east-1 --no-prompts
+```
 
-powershell
+#### Single-Region Cleanup:
+```powershell
+sam delete --stack-name sdrs-stack --region us-east-1 --no-prompts
+```
 
-
-# List your buckets to find the SAM bucket
-aws s3 ls
-# Delete the deployment bucket and its contents (replace with your bucket name)
-aws s3 rb s3://aws-sam-cli-managed-default-samclisourcebucket-<id> --force
-Step 3: Delete CloudWatch Log Groups
-Lambda creates CloudWatch log groups under /aws/lambda/sdrs-*. Clean them up with PowerShell:
-
-powershell
-
-
-Get-ChildItem -ErrorAction SilentlyContinue
-# In us-east-1:
+### Step 2: Delete CloudWatch Log Groups (Optional)
+Lambda generates log groups under `/aws/lambda/sdrs-*`. To purge them via PowerShell:
+```powershell
+# us-east-1:
 (aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/sdrs" --region us-east-1 --query "logGroups[*].logGroupName" --output text).Split() | ForEach-Object {
     if ($_ -ne "") { aws logs delete-log-group --log-group-name $_ --region us-east-1 }
 }
-# If Multi-Region, also clean us-west-2:
+
+# us-west-2 (if multi-region deployed):
 (aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/sdrs" --region us-west-2 --query "logGroups[*].logGroupName" --output text).Split() | ForEach-Object {
     if ($_ -ne "") { aws logs delete-log-group --log-group-name $_ --region us-west-2 }
 }
-Step 4: Reset Frontend Back to Local Demo Sandbox
-After deleting the backend, switch your frontend configuration back to offline Demo Mode: In frontend/.env:
+```
 
-ini
-
-
+### Step 3: Reset Frontend Back to Local Demo Sandbox
+Remove or reset your local environment file:
+```ini
 VITE_DEMO_MODE=true
 VITE_API_URL=
-Step 5: Verification Checklist in AWS Console
-To verify that your account has 0 active SDRS resources remaining:
+```
 
-CloudFormation: Navigate to us-east-1 (and us-west-2) 
-→
-→ Confirm all sdrs-* stacks are in DELETE_COMPLETE status.
-DynamoDB: Tables 
-→
-→ Confirm no sdrs-* tables exist.
-SQS: Queues 
-→
-→ Confirm no sdrs-* queues exist.
-Route 53: Health checks 
-→
-→ Confirm 0 health checks remain.
+---
+
+## 5. Verification Checklist in AWS Console
+
+Confirm 100% resource removal:
+- [ ] **CloudFormation**: Navigate to `us-east-1` and `us-west-2` → Confirm all `sdrs-*` stacks are deleted.
+- [ ] **DynamoDB**: Tables → Confirm no `sdrs-*` tables exist.
+- [ ] **SQS**: Queues → Confirm no `sdrs-*` queues exist.
+- [ ] **Route 53**: Health checks → Confirm 0 SDRS health checks remain.

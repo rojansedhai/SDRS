@@ -261,20 +261,21 @@ All failure injection is **safe, scoped, and reversible**. No resources are dele
 
 ---
 
-## API Endpoints [Real AWS] [MVP]
+## API Endpoints [Real AWS]
 
-All API endpoints require an `x-api-key` header when deployed to AWS:
+Protected API endpoints enforce Amazon Cognito JWT authentication (`Authorization: Bearer <token>`) with verified `sub` claims (SEC-01, SEC-04). The `GET /health` route is the only intentionally unauthenticated endpoint, reserved for Route 53 health checking probes:
 
-| Method | Path                              | Description                                     |
-|--------|-----------------------------------|-------------------------------------------------|
-| `POST` | `/experiments`                    | Start new experiment                            |
-| `GET`  | `/experiments`                    | List all past and active experiments           |
-| `GET`  | `/experiments/{id}`               | Get experiment status and live telemetry        |
-| `POST` | `/experiments/{id}/stop`          | Stop experiment, compute final PASS/FAIL result|
-| `POST` | `/experiments/{id}/failures`      | Inject non-destructive failure                  |
-| `POST` | `/experiments/{id}/restore`       | Restore pipeline from failure                   |
-| `POST` | `/experiments/{id}/events`        | Generate and ingest test batch of events        |
-| `GET`  | `/experiments/{id}/metrics`       | Fetch computed real-time metrics snapshot       |
+| Method | Path                              | Auth Required | Description                                     |
+|--------|-----------------------------------|:-------------:|-------------------------------------------------|
+| `GET`  | `/health`                         | ❌ (Public)   | Route 53 health check probe (HTTP 200 or 503)   |
+| `POST` | `/experiments`                    | ✅ (JWT)      | Start new experiment (assigns `userId` from JWT)|
+| `GET`  | `/experiments`                    | ✅ (JWT)      | List all past and active experiments           |
+| `GET`  | `/experiments/{id}`               | ✅ (JWT)      | Get experiment status and live telemetry        |
+| `POST` | `/experiments/{id}/stop`          | ✅ (JWT)      | Stop experiment, compute final PASS/FAIL result|
+| `POST` | `/experiments/{id}/failures`      | ✅ (JWT)      | Inject non-destructive failure (Failure Engine) |
+| `POST` | `/experiments/{id}/restore`       | ✅ (JWT)      | Restore pipeline from failure                   |
+| `POST` | `/experiments/{id}/events`        | ✅ (JWT)      | Generate and ingest test batch of events        |
+| `GET`  | `/experiments/{id}/metrics`       | ✅ (JWT)      | Fetch computed real-time metrics snapshot       |
 
 ---
 
@@ -308,10 +309,17 @@ aws budgets create-budget \
 
 ### Complete Teardown Command
 When finished experimenting on AWS, destroy all resources:
+
+**Single-Region:**
 ```bash
-cd backend
 sam delete --stack-name sdrs-stack --region us-east-1 --no-prompts
 ```
+
+**Multi-Region:**
+```powershell
+.\scripts\cleanup.ps1 -PrimaryRegion us-east-1 -SecondaryRegion us-west-2
+```
+*(Or on Linux/macOS: `./scripts/cleanup.sh`)*
 
 ---
 

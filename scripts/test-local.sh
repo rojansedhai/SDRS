@@ -34,7 +34,7 @@ export VITE_DEMO_MODE=true
 echo ""
 echo "🚀 Starting development server..."
 echo "   Demo mode: ON (simulated AWS services)"
-echo "   URL: http://localhost:5173"
+echo "   URL: http://localhost:3000"
 echo ""
 npm run dev
 
