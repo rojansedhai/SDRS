@@ -308,6 +308,14 @@ aws cloudformation delete-stack --stack-name sdrs-multiregion-orchestrator --reg
 Write-Host "Waiting for orchestrator stack deletion..."
 aws cloudformation wait stack-delete-complete --stack-name sdrs-multiregion-orchestrator --region us-east-1
 
+# 4. (Optional) Delete SAM Staging S3 Bucket
+# Note: SDRS does not use S3 for runtime data storage. This bucket is created by SAM CLI to stage Lambda ZIP archives.
+$SamBucket = (aws s3 ls | Select-String "aws-sam-cli-managed").ToString().Trim().Split()[-1]
+if ($SamBucket) {
+    Write-Host "Emptying and deleting SAM staging bucket: $SamBucket"
+    aws s3 rb "s3://$SamBucket" --force
+}
+
 Write-Host "All AWS resources deleted cleanly. Zero continuing costs." -ForegroundColor Green
 ```
 

@@ -164,7 +164,21 @@ Lambda generates log groups under `/aws/lambda/sdrs-*`. To purge them via PowerS
 }
 ```
 
-### Step 3: Reset Frontend Back to Local Demo Sandbox
+### Step 3: SAM S3 Deployment Staging Bucket (Optional)
+When deploying via `sam deploy --resolve-s3`, the AWS SAM CLI automatically creates a managed S3 bucket named `aws-sam-cli-managed-default-samclisourcebucket-<id>` to stage packaged Lambda `.zip` archives.
+
+* **Note on SDRS Architecture:** SDRS does **not** use S3 for runtime data storage (all events and metrics are stored in DynamoDB Global Tables).
+* **Shared SAM Usage:** If you use AWS SAM for other projects, you can safely leave this bucket intact; SAM reuses it across deployments.
+* **Complete Account Purge:** If you want a 100% spotless account with zero leftover storage:
+```powershell
+# 1. List buckets to find your SAM bucket name:
+aws s3 ls
+
+# 2. Delete the bucket and all staged ZIP files:
+aws s3 rb s3://aws-sam-cli-managed-default-samclisourcebucket-<id> --force
+```
+
+### Step 4: Reset Frontend Back to Local Demo Sandbox
 Remove or reset your local environment file:
 ```ini
 VITE_DEMO_MODE=true
