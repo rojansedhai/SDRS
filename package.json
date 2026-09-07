@@ -1,0 +1,13 @@
+{
+  "name": "sdrs-root",
+  "version": "1.0.0",
+  "description": "Serverless Disaster Recovery Simulator (SDRS)",
+  "private": true,
+  "scripts": {
+    "test": "npm --prefix backend test",
+    "test:backend": "npm --prefix backend test",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev": "npm --prefix frontend run dev"
+  }
+}
+

@@ -1,0 +1,138 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --dashboard-bg: #f8fafc;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+}
+
+.dark {
+  --dashboard-bg: #0f172a;
+  --card-bg: #1e293b;
+  --card-border: #334155;
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--dashboard-bg);
+  color: #1e293b;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark body {
+  color: #f8fafc;
+}
+
+/* Custom Scrollbar */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* React Flow Crisp Rendering & Antialiasing */
+.react-flow__node {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.react-flow__viewport {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+
+/* Ensure vector-crisp sharpness for SVG icons across all zoom levels */
+svg {
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
+}
+
+/* ==========================================================================
+   React Flow Controls (Zoom In, Zoom Out, Fit View) - Light & Dark Mode
+   ========================================================================== */
+
+.react-flow__controls {
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1) !important;
+  background-color: #ffffff !important;
+}
+
+.react-flow__controls-button {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  color: #334155 !important;
+  width: 28px !important;
+  height: 28px !important;
+  box-sizing: content-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 4px !important;
+  transition: background-color 0.15s ease, color 0.15s ease !important;
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+
+.react-flow__controls-button:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.react-flow__controls-button svg {
+  fill: #334155 !important;
+  width: 14px !important;
+  height: 14px !important;
+  max-width: 14px !important;
+  max-height: 14px !important;
+}
+
+/* Dark Mode Controls */
+.dark .react-flow__controls {
+  border-color: #334155 !important;
+  background-color: #1e293b !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+
+.dark .react-flow__controls-button {
+  background-color: #1e293b !important;
+  border-bottom: 1px solid #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+
+.dark .react-flow__controls-button:hover {
+  background-color: #334155 !important;
+}
+
+.dark .react-flow__controls-button svg {
+  fill: #f1f5f9 !important;
+}
+
+.dark .react-flow__controls-button:disabled svg {
+  fill: #64748b !important;
+}
+
+

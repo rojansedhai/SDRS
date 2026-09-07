@@ -1,0 +1,273 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SDRS Multi-Region Orchestrator — Authoritative Storage & Route 53 Failover.
+  Authoritatively deploys DynamoDB Global Tables replicated between two configurable regions,
+  and provisions Route 53 automated health checking and Alias A/AAAA failover routing.
+  NOTE: Global Table replication is asynchronous; cross-region consistency is measured empirically.
+
+Parameters:
+  PrimaryRegion:
+    Type: String
+    Default: us-east-1
+    Description: Primary AWS Region (Active)
+  SecondaryRegion:
+    Type: String
+    Default: us-west-2
+    Description: Secondary AWS Region (Standby / Failover target)
+  PrimaryApiId:
+    Type: String
+    Default: ""
+    Description: API Gateway ID in primary region for Route 53 /health monitoring
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: Route 53 Public Hosted Zone ID for DNS failover records
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Fully qualified domain name for multi-region service (e.g., api.sdrs.example.com)
+  PrimaryRegionalDomainName:
+    Type: String
+    Default: ""
+    Description: RegionalDomainName output from Primary Region SDRS Stack
+  PrimaryRegionalHostedZoneId:
+    Type: String
+    Default: ""
+    Description: RegionalHostedZoneId output from Primary Region SDRS Stack
+  SecondaryRegionalDomainName:
+    Type: String
+    Default: ""
+    Description: RegionalDomainName output from Secondary Region SDRS Stack
+  SecondaryRegionalHostedZoneId:
+    Type: String
+    Default: ""
+    Description: RegionalHostedZoneId output from Secondary Region SDRS Stack
+
+Conditions:
+  HasPrimaryApi: !Not [!Equals [!Ref PrimaryApiId, ""]]
+  HasRoute53Domain: !And
+    - !Not [!Equals [!Ref HostedZoneId, ""]]
+    - !Not [!Equals [!Ref DomainName, ""]]
+  HasPrimaryAliasTarget: !And
+    - !Condition HasRoute53Domain
+    - !Not [!Equals [!Ref PrimaryRegionalDomainName, ""]]
+    - !Not [!Equals [!Ref PrimaryRegionalHostedZoneId, ""]]
+  HasSecondaryAliasTarget: !And
+    - !Condition HasRoute53Domain
+    - !Not [!Equals [!Ref SecondaryRegionalDomainName, ""]]
+    - !Not [!Equals [!Ref SecondaryRegionalHostedZoneId, ""]]
+
+Resources:
+  # ============================================================================
+  # 1. Authoritative DynamoDB Global Tables (INF-01)
+  # ============================================================================
+
+  EventsGlobalTable:
+    Type: AWS::DynamoDB::GlobalTable
+    Properties:
+      TableName: sdrs-events-global
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: eventId
+          AttributeType: S
+        - AttributeName: experimentId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: eventId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: experimentId-createdAt
+          KeySchema:
+            - AttributeName: experimentId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Replicas:
+        - Region: !Ref PrimaryRegion
+          PointInTimeRecoverySpecification:
+            PointInTimeRecoveryEnabled: true
+        - Region: !Ref SecondaryRegion
+          PointInTimeRecoverySpecification:
+            PointInTimeRecoveryEnabled: true
+
+  ExperimentsGlobalTable:
+    Type: AWS::DynamoDB::GlobalTable
+    Properties:
+      TableName: sdrs-experiments-global
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: experimentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: experimentId
+          KeyType: HASH
+      Replicas:
+        - Region: !Ref PrimaryRegion
+          PointInTimeRecoverySpecification:
+            PointInTimeRecoveryEnabled: true
+        - Region: !Ref SecondaryRegion
+          PointInTimeRecoverySpecification:
+            PointInTimeRecoveryEnabled: true
+
+  MetricsGlobalTable:
+    Type: AWS::DynamoDB::GlobalTable
+    Properties:
+      TableName: sdrs-metrics-global
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: experimentId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: experimentId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      Replicas:
+        - Region: !Ref PrimaryRegion
+        - Region: !Ref SecondaryRegion
+
+  ConfigGlobalTable:
+    Type: AWS::DynamoDB::GlobalTable
+    Properties:
+      TableName: sdrs-config-global
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: configKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: configKey
+          KeyType: HASH
+      Replicas:
+        - Region: !Ref PrimaryRegion
+        - Region: !Ref SecondaryRegion
+
+  # ============================================================================
+  # 2. Route 53 Active-Passive Health Check & Automated Failover Routing (INF-02)
+  # ============================================================================
+
+  PrimaryRoute53HealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Condition: HasPrimaryApi
+    Properties:
+      HealthCheckConfig:
+        Type: HTTPS
+        ResourcePath: /health
+        FullyQualifiedDomainName: !Sub "${PrimaryApiId}.execute-api.${PrimaryRegion}.amazonaws.com"
+        Port: 443
+        RequestInterval: 10 # Fast 10-second evaluation interval
+        FailureThreshold: 3  # Trips after 30 seconds of persistent outage
+        MeasureLatency: true
+        Inverted: false
+      HealthCheckTags:
+        - Key: Environment
+          Value: SDRS-Simulator
+        - Key: ManagedBy
+          Value: SDRS-MultiRegion
+
+  # Primary Failover DNS Record (Active) - Alias A Record targeting regional custom domain
+  PrimaryAliasDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasPrimaryAliasTarget
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      SetIdentifier: PrimaryRegionActive
+      Failover: PRIMARY
+      HealthCheckId: !If [HasPrimaryApi, !Ref PrimaryRoute53HealthCheck, !Ref "AWS::NoValue"]
+      AliasTarget:
+        DNSName: !Ref PrimaryRegionalDomainName
+        HostedZoneId: !Ref PrimaryRegionalHostedZoneId
+        EvaluateTargetHealth: false
+
+  # Secondary Failover DNS Record (Standby) - Alias A Record targeting regional custom domain
+  SecondaryAliasDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasSecondaryAliasTarget
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      SetIdentifier: SecondaryRegionStandby
+      Failover: SECONDARY
+      AliasTarget:
+        DNSName: !Ref SecondaryRegionalDomainName
+        HostedZoneId: !Ref SecondaryRegionalHostedZoneId
+        EvaluateTargetHealth: false
+
+  # ============================================================================
+  # 3. Authoritative Authentication: Cognito User Pool & Client (SEC-01)
+  # ============================================================================
+  SDRSUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "sdrs-user-pool-${PrimaryRegion}"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+
+  SDRSUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: sdrs-frontend-client
+      UserPoolId: !Ref SDRSUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+Outputs:
+  EventsGlobalTableName:
+    Description: "Replicated DynamoDB Events Global Table name referenced by regional stacks"
+    Value: !Ref EventsGlobalTable
+  ExperimentsGlobalTableName:
+    Description: "Replicated DynamoDB Experiments Global Table name referenced by regional stacks"
+    Value: !Ref ExperimentsGlobalTable
+  MetricsGlobalTableName:
+    Description: "Replicated DynamoDB Metrics Global Table name"
+    Value: !Ref MetricsGlobalTable
+  ConfigGlobalTableName:
+    Description: "Replicated DynamoDB Config Global Table name"
+    Value: !Ref ConfigGlobalTable
+  UserPoolId:
+    Description: "Authoritative Cognito User Pool ID for both regions"
+    Value: !Ref SDRSUserPool
+  UserPoolClientId:
+    Description: "Authoritative Cognito User Pool Client ID for both regions"
+    Value: !Ref SDRSUserPoolClient
+  UserPoolIssuerUrl:
+    Description: "Authoritative Cognito JWT Issuer URL for both regions"
+    Value: !Sub "https://cognito-idp.${PrimaryRegion}.amazonaws.com/${SDRSUserPool}"
+  PrimaryHealthCheckId:
+    Description: "Route 53 Health Check ID monitoring Primary Region"
+    Value: !If [HasPrimaryApi, !Ref PrimaryRoute53HealthCheck, "Not Created (No PrimaryApiId provided)"]
+  ConfiguredPrimaryRegion:
+    Value: !Ref PrimaryRegion
+  ConfiguredSecondaryRegion:
+    Value: !Ref SecondaryRegion

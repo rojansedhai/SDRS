@@ -1,0 +1,645 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Disaster Recovery Simulator (SDRS) Backend - Hardened Production Architecture
+
+Parameters:
+  PrimaryRegion:
+    Type: String
+    Default: us-east-1
+    Description: Primary AWS Region for active workload
+  SecondaryRegion:
+    Type: String
+    Default: us-west-2
+    Description: Secondary AWS Region for standby/failover workload
+  DeploymentRegionRole:
+    Type: String
+    Default: primary
+    AllowedValues:
+      - primary
+      - secondary
+    Description: Regional role for this deployed stack (primary or secondary)
+  UseGlobalTables:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: When true, binds to authoritative DynamoDB Global Tables (sdrs-*-global). When false, creates local tables.
+  EventsTableName:
+    Type: String
+    Default: sdrs-events-global
+    Description: Name of the DynamoDB Events Global Table
+  ExperimentsTableName:
+    Type: String
+    Default: sdrs-experiments-global
+    Description: Name of the DynamoDB Experiments Global Table
+  MetricsTableName:
+    Type: String
+    Default: sdrs-metrics-global
+    Description: Name of the DynamoDB Metrics Global Table
+  ConfigTableName:
+    Type: String
+    Default: sdrs-config-global
+    Description: Name of the DynamoDB Config Global Table
+  DomainName:
+    Type: String
+    Default: ""
+    Description: (Optional) Custom domain name for this regional API (e.g., api.sdrs.example.com)
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: (Optional) ACM Certificate ARN in this region matching DomainName
+  CognitoUserPoolId:
+    Type: String
+    Default: ""
+    Description: (Optional) Authoritative Cognito User Pool ID from Multi-Region Orchestrator
+  CognitoUserPoolClientId:
+    Type: String
+    Default: ""
+    Description: Authoritative Cognito User Pool Client ID from Multi-Region Orchestrator
+  CognitoUserPoolIssuerUrl:
+    Type: String
+    Default: ""
+    Description: Authoritative Cognito JWT Issuer URL from Multi-Region Orchestrator
+
+Conditions:
+  CreateLocalTables: !Equals [!Ref UseGlobalTables, "false"]
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref DomainName, ""]]
+    - !Not [!Equals [!Ref CertificateArn, ""]]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - arm64
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        EVENTS_TABLE: !If [CreateLocalTables, !Ref LocalEventsTable, !Ref EventsTableName]
+        EXPERIMENTS_TABLE: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        METRICS_TABLE: !If [CreateLocalTables, !Ref LocalMetricsTable, !Ref MetricsTableName]
+        CONFIG_TABLE: !If [CreateLocalTables, !Ref LocalConfigTable, !Ref ConfigTableName]
+        EVENT_BUS_NAME: !Ref SimulatorEventBus
+        PROCESSING_QUEUE_URL: !Ref ProcessingQueue
+        REGION: !Ref "AWS::Region"
+        DEPLOYMENT_REGION_ROLE: !Ref DeploymentRegionRole
+        PRIMARY_REGION: !Ref PrimaryRegion
+        SECONDARY_REGION: !Ref SecondaryRegion
+
+Resources:
+  # ============================================================================
+  # API Gateway: HTTP API with JWT Authorizer and Strict CORS (SEC-01, SEC-03)
+  # Uses Authoritative Cognito User Pool & App Client from Multi-Region Orchestrator
+  # ============================================================================
+  SimulatorApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - "http://localhost:3000"
+          - "http://localhost:5173"
+          - "http://127.0.0.1:3000"
+          - "http://127.0.0.1:5173"
+        AllowMethods:
+          - "GET"
+          - "POST"
+          - "OPTIONS"
+        AllowHeaders:
+          - "Content-Type"
+          - "Authorization"
+      Auth:
+        DefaultAuthorizer: CognitoJwtAuthorizer
+        Authorizers:
+          CognitoJwtAuthorizer:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Ref CognitoUserPoolIssuerUrl
+              audience:
+                - !Ref CognitoUserPoolClientId
+
+  # ============================================================================
+  # Regional Custom Domain for Route 53 Multi-Region Failover (INF-02)
+  # ============================================================================
+  RegionalApiDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Ref DomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref CertificateArn
+          EndpointType: REGIONAL
+
+  RegionalApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasCustomDomain
+    DependsOn:
+      - RegionalApiDomain
+      - SimulatorApi
+    Properties:
+      ApiId: !Ref SimulatorApi
+      DomainName: !Ref DomainName
+      Stage: "$default"
+
+  # ============================================================================
+  # Messaging: EventBridge and SQS
+  # ============================================================================
+  SimulatorEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: sdrs-event-bus
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600 # 14 days
+      SqsManagedSseEnabled: true
+
+  ProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 180
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  EventBridgeToSQSRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref SimulatorEventBus
+      EventPattern:
+        source:
+          - "sdrs.simulator"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ProcessingQueue.Arn
+          Id: "SDRSProcessingQueueTarget"
+
+  SQSQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref ProcessingQueue
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "SQS:SendMessage"
+            Effect: Allow
+            Resource: !GetAtt ProcessingQueue.Arn
+            Principal:
+              Service: "events.amazonaws.com"
+            Condition:
+              ArnEquals:
+                "aws:SourceArn": !GetAtt EventBridgeToSQSRule.Arn
+
+  # ============================================================================
+  # Optional Standalone Local Tables (Used only when UseGlobalTables=false)
+  # ============================================================================
+  LocalEventsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreateLocalTables
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: eventId
+          AttributeType: S
+        - AttributeName: experimentId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: eventId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: experimentId-createdAt
+          KeySchema:
+            - AttributeName: experimentId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LocalExperimentsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreateLocalTables
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: experimentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: experimentId
+          KeyType: HASH
+
+  LocalMetricsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreateLocalTables
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: experimentId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: experimentId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  LocalConfigTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreateLocalTables
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: configKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: configKey
+          KeyType: HASH
+
+  # ============================================================================
+  # Explicit SQS EventSourceMapping for EventProcessorFunction (SEC-02 Least Privilege)
+  # ============================================================================
+  ProcessingQueueEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt ProcessingQueue.Arn
+      FunctionName: !GetAtt EventProcessorFunction.Arn
+      BatchSize: 10
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+  # ============================================================================
+  # Lambda Functions (Protected by JWT Authorizer by default; /health public)
+  # ============================================================================
+  StartExperimentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/startExperiment.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref SimulatorEventBus
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments
+            Method: POST
+            ApiId: !Ref SimulatorApi
+
+  ListExperimentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/listExperiments.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments
+            Method: GET
+            ApiId: !Ref SimulatorApi
+
+  GetExperimentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/getExperiment.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalEventsTable, !Ref EventsTableName]
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments/{id}
+            Method: GET
+            ApiId: !Ref SimulatorApi
+
+  StopExperimentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/stopExperiment.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalEventsTable, !Ref EventsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalMetricsTable, !Ref MetricsTableName]
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments/{id}/stop
+            Method: POST
+            ApiId: !Ref SimulatorApi
+
+  InjectFailureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/injectFailure.handler
+      Environment:
+        Variables:
+          FAILURE_ENGINE_FUNCTION_NAME: !Ref FailureEngineFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - LambdaInvokePolicy:
+            FunctionName: !Ref FailureEngineFunction
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments/{id}/failures
+            Method: POST
+            ApiId: !Ref SimulatorApi
+
+  RestoreServiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/restoreService.handler
+      Environment:
+        Variables:
+          FAILURE_ENGINE_FUNCTION_NAME: !Ref FailureEngineFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - LambdaInvokePolicy:
+            FunctionName: !Ref FailureEngineFunction
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments/{id}/restore
+            Method: POST
+            ApiId: !Ref SimulatorApi
+
+  GetMetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/getMetrics.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalEventsTable, !Ref EventsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalMetricsTable, !Ref MetricsTableName]
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments/{id}/metrics
+            Method: GET
+            ApiId: !Ref SimulatorApi
+
+  EventProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: processor/eventProcessor.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalEventsTable, !Ref EventsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalConfigTable, !Ref ConfigTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalMetricsTable, !Ref MetricsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - SQSPollerPolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+
+  GenerateEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/generateEvents.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalConfigTable, !Ref ConfigTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalEventsTable, !Ref EventsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref SimulatorEventBus
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /experiments/{id}/events
+            Method: POST
+            ApiId: !Ref SimulatorApi
+
+  FailureEngineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: failure/failureEngine.handler
+      Environment:
+        Variables:
+          EVENT_PROCESSOR_FUNCTION_NAME: !Ref EventProcessorFunction
+          EVENT_BRIDGE_RULE_NAME: !Ref EventBridgeToSQSRule
+          SQS_EVENT_SOURCE_MAPPING_UUID: !Ref ProcessingQueueEventSourceMapping
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalConfigTable, !Ref ConfigTableName]
+        - Statement:
+            # SEC-02: Hardened least privilege - restricted to SDRS stack-owned resources only
+            - Effect: Allow
+              Action:
+                - "lambda:PutFunctionConcurrency"
+                - "lambda:DeleteFunctionConcurrency"
+                - "lambda:GetFunctionConcurrency"
+              Resource: !GetAtt EventProcessorFunction.Arn
+            - Effect: Allow
+              Action:
+                - "lambda:UpdateEventSourceMapping"
+              Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:event-source-mapping:${ProcessingQueueEventSourceMapping}"
+            - Effect: Allow
+              Action:
+                - "events:DisableRule"
+                - "events:EnableRule"
+              Resource: !GetAtt EventBridgeToSQSRule.Arn
+
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: api/healthCheck.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalConfigTable, !Ref ConfigTableName]
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /health
+            Method: GET
+            ApiId: !Ref SimulatorApi
+            Auth:
+              Authorizer: NONE # Intentionally public for Route 53 Health Checks
+
+  # ============================================================================
+  # Observability & Production Alarms (OPS-01)
+  # ============================================================================
+  SDRSAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "sdrs-alert-topic-${AWS::Region}"
+
+  DLQMessageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "SDRS-DLQ-Backlog-${AWS::Region}"
+      AlarmDescription: "Alerts when messages spill into the Dead Letter Queue, indicating persistent event failures"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref SDRSAlertTopic
+
+  ProcessingQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "SDRS-ProcessingQueue-OldestMessageAge-${AWS::Region}"
+      AlarmDescription: "Alerts when messages in the processing queue exceed 60 seconds age, indicating backlog or consumer throttling"
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ProcessingQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 60
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref SDRSAlertTopic
+
+  ProcessorErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "SDRS-EventProcessor-Errors-${AWS::Region}"
+      AlarmDescription: "Alerts when EventProcessorFunction encounters unhandled execution errors"
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EventProcessorFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref SDRSAlertTopic
+
+  ProcessorThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "SDRS-EventProcessor-Throttles-${AWS::Region}"
+      AlarmDescription: "Alerts when EventProcessorFunction is throttled by AWS Lambda"
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EventProcessorFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref SDRSAlertTopic
+
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "SDRS-HttpApi-5xx-${AWS::Region}"
+      AlarmDescription: "Alerts when API Gateway produces 5xx server errors"
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref SimulatorApi
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref SDRSAlertTopic
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${SimulatorApi}.execute-api.${AWS::Region}.amazonaws.com/"
+  HealthCheckUrl:
+    Description: "Health check endpoint for Route 53 monitoring"
+    Value: !Sub "https://${SimulatorApi}.execute-api.${AWS::Region}.amazonaws.com/health"
+  UserPoolId:
+    Description: "Cognito User Pool ID for JWT authentication"
+    Value: !Ref CognitoUserPoolId
+  UserPoolClientId:
+    Description: "Cognito User Pool Client ID"
+    Value: !Ref CognitoUserPoolClientId
+  UserPoolIssuerUrl:
+    Description: "Cognito JWT Issuer URL"
+    Value: !Ref CognitoUserPoolIssuerUrl
+  RegionalDomainName:
+    Description: "Regional API Gateway Custom Domain Name for Route 53 Alias"
+    Value: !If [HasCustomDomain, !GetAtt RegionalApiDomain.RegionalDomainName, "None"]
+  RegionalHostedZoneId:
+    Description: "Regional API Gateway Hosted Zone ID for Route 53 Alias"
+    Value: !If [HasCustomDomain, !GetAtt RegionalApiDomain.RegionalHostedZoneId, "None"]
+  SimulatorEventBusName:
+    Value: !Ref SimulatorEventBus
+  ProcessingQueueUrl:
+    Value: !Ref ProcessingQueue
+  DeadLetterQueueUrl:
+    Value: !Ref DeadLetterQueue
+  ProcessingQueueEventSourceMappingArn:
+    Value: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:event-source-mapping:${ProcessingQueueEventSourceMapping}"
+  AlertTopicArn:
+    Value: !Ref SDRSAlertTopic

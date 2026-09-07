@@ -1,0 +1,63 @@
+# ==============================================================================
+# SDRS — Hardened Repository .gitignore
+# ==============================================================================
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production Build Outputs
+dist/
+build/
+out/
+frontend/dist/
+
+# TypeScript Build Info & Caches
+*.tsbuildinfo
+*.tsbuildinfo.*
+.eslintcache
+
+# Environment & Secret Files (Never commit real .env files)
+.env
+.env.*
+!.env.example
+*.local
+credentials
+credentials.json
+.aws/
+
+# AWS SAM & CloudFormation
+.aws-sam/
+backend/.aws-sam/
+samconfig.toml.bak
+.sam/
+
+# Test, Coverage & Scratch Files
+coverage/
+.nyc_output/
+*.png.tmp
+crop_test.png
+node_crop.png
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE & Editor Configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
