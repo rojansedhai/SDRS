@@ -109,7 +109,7 @@ npm --prefix backend install
 # Start development server (Demo Mode enabled by default)
 npm --prefix frontend run dev
 ```
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:3000** or **http://localhost:5173** in your browser (both work so choose any you want).
 
 ---
 
