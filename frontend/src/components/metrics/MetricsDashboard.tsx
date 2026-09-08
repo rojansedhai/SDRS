@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { formatDuration, formatPercentage, formatCost, formatNumber } from '../../utils/formatters';
 import { getMetricStatus } from '../../utils/metrics';
+import { Glossary } from '../onboarding/GlossaryTooltip';
 
 /**
  * MetricsDashboard displays current experiment metrics, RTO/RPO targets vs actuals,
@@ -45,7 +46,7 @@ export const MetricsDashboard: React.FC = () => {
   const targetRpoEvt = metrics?.targetRpoEvents ?? activeExperiment?.targetRpoEvents ?? 0;
 
   const actualRtoSec = metrics?.rto !== undefined ? Math.round(metrics.rto / 1000) : undefined;
-  const actualRpoEvt = metrics?.failedCount ?? 0;
+  const actualRpoEvt = metrics?.lostCount ?? 0;
 
   const rtoPass = actualRtoSec !== undefined ? actualRtoSec <= targetRtoSec : true;
   const rpoPass = actualRpoEvt <= targetRpoEvt;
@@ -59,7 +60,7 @@ export const MetricsDashboard: React.FC = () => {
             Resilience & Operational Telemetry
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Real-time telemetry tracking empirical detection, failover, RTO, RPO, and multi-region routing
+            Real-time telemetry tracking empirical detection, failover, <Glossary term="RTO">RTO</Glossary>, <Glossary term="RPO">RPO</Glossary>, and multi-region routing
           </p>
         </div>
 
@@ -84,7 +85,7 @@ export const MetricsDashboard: React.FC = () => {
             </div>
             <div>
               <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500">
-                RTO (Recovery Time)
+                <Glossary term="RTO">RTO (Recovery Time)</Glossary>
               </span>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span className="text-lg font-extrabold text-slate-900 dark:text-white font-mono">
@@ -116,7 +117,7 @@ export const MetricsDashboard: React.FC = () => {
             </div>
             <div>
               <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500">
-                RPO (Data Loss Window)
+                <Glossary term="RPO">RPO (Data Loss Window)</Glossary>
               </span>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span className="text-lg font-extrabold text-slate-900 dark:text-white font-mono">
@@ -202,7 +203,7 @@ export const MetricsDashboard: React.FC = () => {
       {/* Main Telemetry Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
         <MetricCard label="Detection Time" value={displayValue(metrics?.detectionTime, formatDuration)} icon={Clock} status={safeStatus('detectionTime', metrics?.detectionTime)} />
-        <MetricCard label={isMulti ? "DNS Failover Time" : "Failover Time"} value={displayValue(isMulti ? metrics?.dnsFailoverTime : metrics?.failoverTime, formatDuration)} icon={ArrowRightLeft} status={safeStatus('failoverTime', isMulti ? (metrics?.dnsFailoverTime ?? metrics?.failoverTime) : metrics?.failoverTime)} />
+        <MetricCard label={isMulti ? <Glossary term="Failover">DNS Failover Time</Glossary> : <Glossary term="Failover">Failover Time</Glossary>} value={displayValue(isMulti ? metrics?.dnsFailoverTime : metrics?.failoverTime, formatDuration)} icon={ArrowRightLeft} status={safeStatus('failoverTime', isMulti ? (metrics?.dnsFailoverTime ?? metrics?.failoverTime) : metrics?.failoverTime)} />
         <MetricCard label="Recovery Time" value={displayValue(metrics?.recoveryTime, formatDuration)} icon={RotateCcw} status={safeStatus('recoveryTime', metrics?.recoveryTime)} />
         <MetricCard label="Total Requests" value={displayValue(metrics?.totalRequests, formatNumber)} icon={Activity} />
 
@@ -212,8 +213,8 @@ export const MetricsDashboard: React.FC = () => {
         <MetricCard label="Lost Events" value={displayValue(metrics?.lostCount, formatNumber)} icon={AlertTriangle} status={metrics?.lostCount ? 'critical' : 'good'} />
 
         <MetricCard label="Data Consistency" value={displayValue(metrics?.dataConsistency, formatPercentage)} icon={Shield} status={safeStatus('dataConsistency', metrics?.dataConsistency)} />
-        <MetricCard label="RTO (Measured)" value={displayValue(metrics?.rto, formatDuration)} icon={Timer} status={safeStatus('rto', metrics?.rto)} />
-        <MetricCard label="RPO (Data Loss)" value={displayValue(metrics?.rpo, formatDuration)} icon={HardDrive} status={safeStatus('rpo', metrics?.rpo)} />
+        <MetricCard label={<Glossary term="RTO">RTO (Measured)</Glossary>} value={displayValue(metrics?.rto, formatDuration)} icon={Timer} status={safeStatus('rto', metrics?.rto)} />
+        <MetricCard label={<Glossary term="RPO">RPO (Data Loss)</Glossary>} value={displayValue(metrics?.rpo, formatDuration)} icon={HardDrive} status={safeStatus('rpo', metrics?.rpo)} />
         <MetricCard label="Estimated Cost" value={displayValue(metrics?.estimatedCost, formatCost)} icon={DollarSign} />
       </div>
     </div>

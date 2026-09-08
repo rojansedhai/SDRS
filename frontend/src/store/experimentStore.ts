@@ -167,7 +167,7 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
         const rpoTarget = finalMetrics.targetRpoEvents ?? 0;
 
         const rtoPass = finalMetrics.rto !== undefined ? finalMetrics.rto <= rtoTargetMs : true;
-        const rpoPass = finalMetrics.failedCount <= rpoTarget;
+        const rpoPass = (finalMetrics.lostCount ?? 0) <= rpoTarget;
         finalMetrics.rtoPass = rtoPass;
         finalMetrics.rpoPass = rpoPass;
 
@@ -263,22 +263,40 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
       const recoveryTime = Math.max(1000, now - injectedAt);
       const rto = Math.max(500, now - detectedAt);
       const isRegional = active.failureType === 'region-failure';
-      const rpo = isRegional ? 0 : Math.floor(Math.random() * 1500 + 2000);
+      const isBufferingFailure = active.failureType === 'lambda-failure' || active.failureType === 'sqs-backlog';
+      const isDdbThrottle = active.failureType === 'ddb-throttle';
 
       const currentMetrics = active.metrics ? { ...active.metrics } : createInitialMetrics();
+
+      // For buffering failures (SQS/Lambda), queued messages drain successfully into DynamoDB
+      if (isBufferingFailure || isDdbThrottle) {
+        currentMetrics.successCount = currentMetrics.totalRequests - (currentMetrics.lostCount ?? 0);
+        currentMetrics.failedCount = 0;
+        currentMetrics.dataConsistency = 100;
+      }
+
+      // RPO is 0 for buffering failures and ideal regional failover; only non-zero if events were actually lost
+      const rpo = (isBufferingFailure || isRegional)
+        ? 0
+        : ((currentMetrics.lostCount ?? 0) > 0 ? Math.floor(Math.random() * 1500 + 1000) : 0);
+
       currentMetrics.recoveryTime = recoveryTime;
       currentMetrics.rto = rto;
       currentMetrics.rpo = rpo;
 
       const rtoTargetMs = (currentMetrics.targetRtoSeconds ?? 60) * 1000;
       currentMetrics.rtoPass = rto <= rtoTargetMs;
-      currentMetrics.rpoPass = currentMetrics.failedCount <= (currentMetrics.targetRpoEvents ?? 0);
+      currentMetrics.rpoPass = (currentMetrics.lostCount ?? 0) <= (currentMetrics.targetRpoEvents ?? 0);
 
       const updatedTimeline = [...active.timeline];
       if (isRegional) {
         updatedTimeline.push(
           generateMockTimeline('normal', 'Primary region health check returned HTTP 200 OK'),
           generateMockTimeline('failback', 'Route 53 DNS failback completed; Primary region ACTIVE')
+        );
+      } else if (isBufferingFailure) {
+        updatedTimeline.push(
+          generateMockTimeline('recovery', 'Normal traffic restored; SQS buffer drained and all events processed')
         );
       } else {
         updatedTimeline.push(
@@ -342,6 +360,7 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
       const isMulti = active.regionMode === 'multi-region' || get().regionMode === 'multi-region';
 
       const newReqs = Math.floor(Math.random() * 8) + 14;
+      let newSuccess = newReqs;
       let newFailed = 0;
       let newDuplicates = 0;
       let newLost = 0;
@@ -398,10 +417,12 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
           if (elapsed < 4500) {
             // Before failover completes, requests sent to primary fail
             newFailed = Math.round(newReqs * 0.7);
+            newSuccess = Math.max(0, newReqs - newFailed);
             primaryAdd = newReqs;
             secondaryAdd = 0;
           } else {
             // After failover completes, traffic routed cleanly to secondary!
+            newSuccess = newReqs;
             newFailed = 0;
             primaryAdd = 0;
             secondaryAdd = newReqs;
@@ -418,24 +439,40 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
 
           switch (failureType) {
             case 'lambda-failure':
-              newFailed = Math.round(newReqs * 0.9);
-              break;
-            case 'ddb-throttle':
-              newFailed = Math.round(newReqs * 0.45);
-              newDuplicates = Math.floor(Math.random() * 3);
+              // SQS is buffering all incoming events safely; zero data loss
+              newSuccess = 0;
+              newFailed = 0;
+              newLost = 0;
               break;
             case 'sqs-backlog':
-              newFailed = Math.round(newReqs * 0.25);
+              // ESM paused; SQS buffers all incoming events safely without burning retries
+              newSuccess = 0;
+              newFailed = 0;
+              newLost = 0;
+              break;
+            case 'ddb-throttle':
+              // DynamoDB write throttling: 40% succeed after backoff, 50% retried by SQS, 0 lost
+              newSuccess = Math.round(newReqs * 0.4);
+              newFailed = Math.round(newReqs * 0.5);
+              newDuplicates = Math.floor(Math.random() * 2) + 1;
+              newLost = 0;
               break;
             case 'api-failure':
-            case 'eventbridge-failure':
+              // API Gateway returns HTTP 500 at ingress: requests are dropped before entering queue
+              newSuccess = 0;
               newFailed = newReqs;
+              newLost = newReqs;
+              break;
+            case 'eventbridge-failure':
+              // Rule disabled: events dropped silently before reaching SQS
+              newSuccess = 0;
+              newFailed = newReqs;
+              newLost = newReqs;
               break;
           }
         }
       }
 
-      const newSuccess = Math.max(0, newReqs - newFailed);
       current.totalRequests += newReqs;
       current.successCount += newSuccess;
       current.failedCount += newFailed;
@@ -444,21 +481,21 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
       current.primaryRequests = (current.primaryRequests || 0) + primaryAdd;
       current.secondaryRequests = (current.secondaryRequests || 0) + secondaryAdd;
 
-      // Recalculate data consistency
-      const consistentEvents = Math.max(0, current.totalRequests - current.failedCount - current.duplicateCount - current.lostCount);
+      // Recalculate data consistency (lost and duplicate events reduce consistency)
+      const consistentEvents = Math.max(0, current.totalRequests - current.lostCount - current.duplicateCount);
       current.dataConsistency = current.totalRequests > 0
         ? Math.max(0, Math.round((consistentEvents / current.totalRequests) * 10000) / 100)
         : 100;
 
-      // Recalculate resilience score
+      // Recalculate resilience score (evaluated against actual lost events, not queue backlog)
       const rtoTargetMs = (current.targetRtoSeconds ?? 60) * 1000;
       let rtoScore = 30;
       if (current.rto) {
         rtoScore = current.rto <= rtoTargetMs ? 30 : Math.max(0, 30 - Math.round(((current.rto - rtoTargetMs) / rtoTargetMs) * 30));
       }
-      const rpoScore = current.failedCount <= (current.targetRpoEvents ?? 0) ? 30 : Math.max(0, 30 - current.failedCount * 2);
+      const rpoScore = (current.lostCount ?? 0) <= (current.targetRpoEvents ?? 0) ? 30 : Math.max(0, 30 - (current.lostCount ?? 0) * 2);
       const consistencyScore = Math.round((current.dataConsistency / 100) * 30);
-      const errorScore = Math.max(0, Math.round((1 - (current.failedCount / Math.max(1, current.totalRequests))) * 10));
+      const errorScore = Math.max(0, Math.round((1 - ((current.failedCount + current.lostCount) / Math.max(1, current.totalRequests))) * 10));
       current.resilienceScore = Math.max(0, Math.min(100, rtoScore + rpoScore + consistencyScore + errorScore));
 
       // Update estimated cost
@@ -475,6 +512,16 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
         secondaryRequests: current.secondaryRequests
       });
 
+      const isBuffering = isInFailure && (failureType === 'lambda-failure' || failureType === 'sqs-backlog' || failureType === 'ddb-throttle');
+      const calculatedQueueDepth = isBuffering
+        ? Math.min(500, Math.max(12, current.totalRequests - current.successCount - current.lostCount))
+        : Math.floor(Math.random() * 3);
+
+      const isProcessingHalted = isInFailure && (failureType === 'lambda-failure' || failureType === 'sqs-backlog');
+      const errorRate = isProcessingHalted
+        ? 100
+        : (newReqs > 0 ? Math.round(((newFailed + newLost) / newReqs) * 100) : 0);
+
       const snapshot: MetricSnapshot = {
         timestamp: new Date(now).toISOString(),
         totalRequests: current.totalRequests,
@@ -486,8 +533,8 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
         secondaryRequests: current.secondaryRequests,
         avgLatency: isInFailure ? (failureType === 'region-failure' && !get().failoverActive ? 850 : 180) : 95,
         p95Latency: isInFailure ? (failureType === 'region-failure' && !get().failoverActive ? 1600 : 320) : 190,
-        queueDepth: failureType === 'sqs-backlog' ? Math.min(250, 20 + current.failedCount) : 1,
-        errorRate: newReqs > 0 ? Math.round((newFailed / newReqs) * 100) : 0,
+        queueDepth: calculatedQueueDepth,
+        errorRate,
       };
 
       const newHistory = [...get().metricsHistory.slice(-29), snapshot];
@@ -508,9 +555,21 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
     try {
       const active = get().activeExperiment;
       if (active && active.status === 'running') {
+        const isMulti = active.regionMode === 'multi-region' || get().regionMode === 'multi-region';
+
+        // Check if regional failover should be activated during an active region-failure in live mode
+        if (isMulti && active.failureType === 'region-failure' && !active.recoveredAt && !get().failoverActive) {
+          const elapsed = active.failureInjectedAt ? Date.now() - new Date(active.failureInjectedAt).getTime() : 0;
+          if (elapsed >= 4500) {
+            set({
+              failoverActive: true,
+              serviceRoles: { primary: 'standby', secondary: 'active' }
+            });
+          }
+        }
+
         // In live AWS mode, send ongoing workload events so pipeline throughput and outages are active
         try {
-          const isMulti = active.regionMode === 'multi-region' || get().regionMode === 'multi-region';
           const targetRegion = (isMulti && get().failoverActive) ? (active.secondaryRegion || 'us-west-2') : (active.primaryRegion || 'us-east-1');
           await api.generateEvents(id, 10, { region: targetRegion });
         } catch (genErr) {
@@ -520,11 +579,16 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
       }
 
       const response = await api.getMetrics(id);
+      const isFailoverObserved = (response.current?.secondaryRequests ?? 0) > 0 || !!response.current?.failoverTime;
       set(state => ({
         activeExperiment: state.activeExperiment
           ? { ...state.activeExperiment, metrics: response.current }
           : null,
-        metricsHistory: response.history || []
+        metricsHistory: response.history || [],
+        ...(isFailoverObserved && !state.activeExperiment?.recoveredAt ? {
+          failoverActive: true,
+          serviceRoles: { primary: 'standby', secondary: 'active' }
+        } : {})
       }));
     } catch (error) {
       console.error(error);

@@ -51,6 +51,7 @@ export async function calculateMetrics(experimentId) {
   let failedCount = 0;
   let duplicateCount = 0;
   let lostCount = 0;
+  let pendingCount = 0;
   let primaryEventsCount = 0;
   let secondaryEventsCount = 0;
   const latencies = [];
@@ -103,8 +104,10 @@ export async function calculateMetrics(experimentId) {
       }
     } else if (event.status === 'duplicate') {
       duplicateCount++;
-    } else if (event.status === 'pending' || event.status === 'lost') {
+    } else if (event.status === 'lost') {
       lostCount++;
+    } else if (event.status === 'pending') {
+      pendingCount++;
     }
   }
 
@@ -154,7 +157,9 @@ export async function calculateMetrics(experimentId) {
 
   // Derive RPO: data loss window between last pre-failure write and first post-recovery write
   let rpo = undefined;
-  if (lastSuccessBeforeFailure && firstSuccessAfterRecovery) {
+  if (lostCount === 0) {
+    rpo = 0;
+  } else if (lastSuccessBeforeFailure && firstSuccessAfterRecovery) {
     rpo = Math.max(0, new Date(firstSuccessAfterRecovery).getTime() - new Date(lastSuccessBeforeFailure).getTime());
   }
 
@@ -164,13 +169,13 @@ export async function calculateMetrics(experimentId) {
   const rtoTargetMs = rtoTargetSeconds * 1000;
 
   const rtoPass = rto !== undefined ? rto <= rtoTargetMs : true;
-  const rpoPass = failedCount <= rpoTargetEvents;
+  const rpoPass = (lostCount ?? 0) <= rpoTargetEvents;
 
   // Compute composite Resilience Score
   const resilienceScore = calculateResilienceScore({
     rto,
     rtoTargetMs,
-    rpoEvents: failedCount,
+    rpoEvents: lostCount ?? 0,
     rpoTargetEvents,
     dataConsistency,
     totalRequests,
@@ -202,6 +207,8 @@ export async function calculateMetrics(experimentId) {
     failedCount,
     duplicateCount,
     lostCount,
+    pendingCount,
+    queueDepth: pendingCount,
     primaryEventsCount,
     secondaryEventsCount,
     primaryRequests: primaryEventsCount,

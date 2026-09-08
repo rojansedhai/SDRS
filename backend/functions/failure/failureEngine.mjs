@@ -108,6 +108,10 @@ export const handler = async (event) => {
             Name: targetRule,
             EventBusName: targetBus
           }));
+          await putItem({
+            TableName: TABLE_NAMES.CONFIG,
+            Item: { configKey: 'chaos-eventbridge-failure', active: true, experimentId, activatedAt: new Date().toISOString() }
+          });
           break;
 
         case 'region-failure':
@@ -199,6 +203,11 @@ export const handler = async (event) => {
       } catch (e) {
         console.warn('Failed to restore EventBridge rule:', e.message);
       }
+
+      await putItem({
+        TableName: TABLE_NAMES.CONFIG,
+        Item: { configKey: 'chaos-eventbridge-failure', active: false, restoredAt: new Date().toISOString() }
+      });
 
       // 6. Restore Regional Health Check flag
       await putItem({

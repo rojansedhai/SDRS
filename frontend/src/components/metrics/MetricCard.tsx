@@ -1,7 +1,7 @@
 import React from 'react';
 
 export interface MetricCardProps {
-  label: string;
+  label: React.ReactNode;
   value: string | number;
   unit?: string;
   icon: React.ElementType;

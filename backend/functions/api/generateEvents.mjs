@@ -91,6 +91,34 @@ export const handler = async (event) => {
 
     if (apiFailureConfig.Item && apiFailureConfig.Item.active) {
       console.warn(`[Chaos] Simulated API Gateway failure triggered for experiment ${experimentId}`);
+      
+      // Record ingress failure records into DynamoDB so metrics accurately capture failedCount & errorRate
+      try {
+        const body = event.body ? JSON.parse(event.body) : {};
+        const count = Math.min(500, Math.max(1, body.count || 10));
+        const eventRegion = body.region || process.env.REGION || 'us-east-1';
+        const ttl = Math.floor(Date.now() / 1000) + (7 * 24 * 3600);
+        const failedEvents = [];
+        for (let i = 0; i < count; i++) {
+          const evt = createEvent(experimentId, i + 1, eventRegion);
+          evt.status = 'failed';
+          evt.error = 'Simulated API Gateway Route Failure: 500 Internal Server Error';
+          evt.failedAt = new Date().toISOString();
+          failedEvents.push({
+            PutRequest: {
+              Item: { ...evt, ttl }
+            }
+          });
+        }
+        await batchWriteWithRetry({
+          RequestItems: {
+            [TABLE_NAMES.EVENTS]: failedEvents.slice(0, 25)
+          }
+        });
+      } catch (logErr) {
+        console.warn('Could not record failed ingress events:', logErr.message);
+      }
+
       return {
         statusCode: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -102,6 +130,18 @@ export const handler = async (event) => {
       };
     }
 
+    // Check chaos-eventbridge-failure switch
+    let isEbFailure = false;
+    try {
+      const ebFailureConfig = await getItem({
+        TableName: TABLE_NAMES.CONFIG,
+        Key: { configKey: 'chaos-eventbridge-failure' }
+      });
+      isEbFailure = !!(ebFailureConfig.Item && ebFailureConfig.Item.active);
+    } catch (cfgErr) {
+      console.warn('Could not check chaos-eventbridge-failure flag:', cfgErr.message);
+    }
+
     const body = event.body ? JSON.parse(event.body) : {};
     const count = Math.min(500, Math.max(1, body.count || 10));
     const duplicateCount = Math.min(count, Math.max(0, body.duplicateCount || 0));
@@ -110,6 +150,9 @@ export const handler = async (event) => {
     const events = [];
     for (let i = 0; i < count; i++) {
       const evt = createEvent(experimentId, i + 1, eventRegion);
+      if (isEbFailure) {
+        evt.status = 'lost';
+      }
       events.push(evt);
     }
 

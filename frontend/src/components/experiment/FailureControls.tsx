@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { Zap, Inbox, Database, Globe, Radio, RotateCcw, AlertTriangle, ShieldCheck, Flame } from 'lucide-react';
 import { useExperimentStore } from '../../store/experimentStore';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { Glossary } from '../onboarding/GlossaryTooltip';
 import type { FailureType } from '../../types/experiment';
 
 interface FailureOption {
   type: FailureType;
   icon: React.ElementType;
   name: string;
-  description: string;
+  description: React.ReactNode;
   awsApi: string;
   isRegional?: boolean;
 }
@@ -18,21 +19,21 @@ const failures: FailureOption[] = [
     type: 'lambda-failure',
     icon: Zap,
     name: 'Lambda Failure',
-    description: 'Set reserved concurrency to 0',
+    description: <>Set reserved <Glossary term="Concurrency">concurrency</Glossary> to 0</>,
     awsApi: 'PutFunctionConcurrency=0',
   },
   {
     type: 'sqs-backlog',
     icon: Inbox,
     name: 'SQS Backlog',
-    description: 'Pause consumer Event Source Mapping',
+    description: <>Pause consumer <Glossary term="ESM">Event Source Mapping</Glossary></>,
     awsApi: 'UpdateEventSourceMapping(Enabled=false)',
   },
   {
     type: 'ddb-throttle',
     icon: Database,
     name: 'DynamoDB Throttle',
-    description: 'Simulate write capacity exhaustion',
+    description: <>Simulate <Glossary term="DynamoDB">DynamoDB</Glossary> write capacity exhaustion</>,
     awsApi: 'ProvisionedThroughputExceededException',
   },
   {
@@ -46,14 +47,14 @@ const failures: FailureOption[] = [
     type: 'eventbridge-failure',
     icon: Radio,
     name: 'EventBridge Failure',
-    description: 'Disable event routing rule to SQS',
+    description: <>Disable <Glossary term="EventBridge">EventBridge</Glossary> rule to <Glossary term="SQS">SQS</Glossary></>,
     awsApi: 'DisableRule(EventBridgeToSQSRule)',
   },
   {
     type: 'region-failure',
     icon: Flame,
     name: '💥 Fail Primary Region',
-    description: 'Simulate primary region outage triggering Route 53 DNS failover',
+    description: <>Simulate outage triggering <Glossary term="Route 53">Route 53</Glossary> <Glossary term="Failover">failover</Glossary></>,
     awsApi: 'Route 53 Active-Passive Failover (us-east-1 -> us-west-2)',
     isRegional: true,
   },

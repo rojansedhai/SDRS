@@ -3,6 +3,7 @@ import { useExperimentStore } from '../../store/experimentStore';
 import { calculateDetailedCost } from '../../utils/cost';
 import { formatCost, formatNumber } from '../../utils/formatters';
 import { DollarSign, AlertCircle } from 'lucide-react';
+import { Glossary } from '../onboarding/GlossaryTooltip';
 
 /**
  * CostEstimator displays a granular breakdown of estimated AWS usage costs,
@@ -95,7 +96,7 @@ export const CostEstimator: React.FC = () => {
             +{formatCost(multiRegionDelta)}
           </p>
           <span className="text-[11px] text-blue-600 dark:text-blue-400">
-            Global Tables + Route 53
+            <Glossary term="Global Tables">Global Tables</Glossary> + <Glossary term="Route 53">Route 53</Glossary>
           </span>
         </div>
       </div>
@@ -130,10 +131,10 @@ export const CostEstimator: React.FC = () => {
 
             <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
               <td className="px-4 py-2.5 font-semibold text-slate-900 dark:text-white">
-                {isMulti ? 'DynamoDB Global Tables' : 'DynamoDB Storage'}
+                {isMulti ? <Glossary term="Global Tables">DynamoDB Global Tables</Glossary> : <Glossary term="DynamoDB">DynamoDB Storage</Glossary>}
               </td>
               <td className="px-4 py-2.5 font-mono text-[11px]">
-                {isMulti ? 'Active-Active Replicated Writes (rWUs)' : 'Single-Region On-Demand WRUs'}
+                {isMulti ? <>Active-Active Replicated Writes (<Glossary term="rWU">rWUs</Glossary>)</> : 'Single-Region On-Demand WRUs'}
               </td>
               <td className="px-4 py-2.5">{formatNumber(successCount)} writes</td>
               <td className="px-4 py-2.5 text-right font-mono font-medium">{formatCost(detailed.globalTableCost)}</td>
@@ -142,7 +143,7 @@ export const CostEstimator: React.FC = () => {
             {isMulti && (
               <>
                 <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-4 py-2.5 font-semibold text-slate-900 dark:text-white">Route 53 DNS & Health Checks</td>
+                  <td className="px-4 py-2.5 font-semibold text-slate-900 dark:text-white"><Glossary term="Route 53">Route 53</Glossary> DNS & Health Checks</td>
                   <td className="px-4 py-2.5 font-mono text-[11px]">HTTPS Health Probe (10s interval) + Query Vol</td>
                   <td className="px-4 py-2.5">1 probe @ $0.50/mo + queries</td>
                   <td className="px-4 py-2.5 text-right font-mono font-medium">{formatCost(detailed.route53Cost)}</td>

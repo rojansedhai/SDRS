@@ -9,8 +9,11 @@ import { MetricsDashboard } from './components/metrics/MetricsDashboard';
 import { TimeSeriesChart } from './components/metrics/TimeSeriesChart';
 import { CostEstimator } from './components/metrics/CostEstimator';
 import { ExperimentHistory } from './components/history/ExperimentHistory';
+import { LiveNarrative } from './components/experiment/LiveNarrative';
+import { WelcomeModal, ONBOARDED_STORAGE_KEY } from './components/onboarding/WelcomeModal';
+import { QuickStartBanner, QUICKSTART_STORAGE_KEY } from './components/onboarding/QuickStartBanner';
 import { useExperimentStore } from './store/experimentStore';
-import { Zap, RotateCcw, AlertTriangle, Sparkles } from 'lucide-react';
+import { Zap, RotateCcw, AlertTriangle, Sparkles, BookOpen, RefreshCw } from 'lucide-react';
 import type { FailureType } from './types/experiment';
 
 /**
@@ -19,6 +22,17 @@ import type { FailureType } from './types/experiment';
  */
 function App() {
   const [activeView, setActiveView] = useState('dashboard');
+  const [isWelcomeOpen, setIsWelcomeOpen] = useState<boolean>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        return localStorage.getItem(ONBOARDED_STORAGE_KEY) !== 'true';
+      }
+    } catch {
+      // Gracefully handle storage errors
+    }
+    return false;
+  });
+  const [resetFeedback, setResetFeedback] = useState<string | null>(null);
   const { activeExperiment, metricsHistory, fetchExperiments, fetchMetrics, injectFailure, restoreService, isDemoMode } = useExperimentStore();
 
   // Fetch experiment history on mount
@@ -55,6 +69,12 @@ function App() {
     <DashboardLayout activeView={activeView} onViewChange={handleViewChange}>
       {activeView === 'dashboard' && (
         <div className="space-y-6">
+          {/* Quick-Start Onboarding Banner (visible when no experiment is active) */}
+          <QuickStartBanner
+            onRunScenario={() => setActiveView('experiments')}
+            onShowWelcome={() => setIsWelcomeOpen(true)}
+          />
+
           {/* Guided Scenario Live Banner */}
           {isScenarioRunning && (
             <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-indigo-500/10 border border-indigo-200 dark:border-indigo-800/80 shadow-sm flex flex-wrap items-center justify-between gap-3 animate-fade-in">
@@ -110,6 +130,11 @@ function App() {
           {/* Architecture Overview */}
           <section aria-label="Architecture Overview">
             <ArchitectureDiagram />
+          </section>
+
+          {/* Live System Narration */}
+          <section aria-label="Live System Narration">
+            <LiveNarrative />
           </section>
 
           {/* Experiment Controls + Failure Injection */}
@@ -253,10 +278,62 @@ function App() {
                   </p>
                 </div>
               </div>
+
+              <hr className="border-slate-100 dark:border-slate-800" />
+
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
+                  Onboarding & Walkthrough Guide
+                </h3>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-3">
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Re-open the interactive 3-step walkthrough tour or reset your dismissed hint preferences.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsWelcomeOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
+                    >
+                      <BookOpen size={14} />
+                      <span>Launch Welcome Tour</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          localStorage.removeItem(ONBOARDED_STORAGE_KEY);
+                          localStorage.removeItem(QUICKSTART_STORAGE_KEY);
+                          setResetFeedback('Tutorial hints and tour reset!');
+                          setTimeout(() => setResetFeedback(null), 3000);
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-medium transition-all active:scale-95"
+                    >
+                      <RefreshCw size={14} />
+                      <span>Reset Tutorial Hints</span>
+                    </button>
+                    {resetFeedback && (
+                      <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium animate-fade-in">
+                        {resetFeedback}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Onboarding Welcome Modal */}
+      <WelcomeModal
+        open={isWelcomeOpen}
+        onClose={() => setIsWelcomeOpen(false)}
+        onNavigateToExperiments={() => setActiveView('experiments')}
+      />
     </DashboardLayout>
   );
 }

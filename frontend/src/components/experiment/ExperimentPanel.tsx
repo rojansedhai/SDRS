@@ -3,6 +3,7 @@ import { useExperimentStore } from '../../store/experimentStore';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { formatDuration, formatPercentage } from '../../utils/formatters';
 import { Play, Square, RotateCcw, CheckCircle2, AlertTriangle, ShieldCheck, Clock, Timer, HardDrive, ShieldAlert } from 'lucide-react';
+import { Glossary } from '../onboarding/GlossaryTooltip';
 import type { FailureType } from '../../types/experiment';
 
 interface ExperimentPanelProps {
@@ -149,7 +150,7 @@ export const ExperimentPanel: React.FC<ExperimentPanelProps> = ({ onViewHistory 
           <div className="grid grid-cols-2 gap-3 pt-1 border-t border-slate-100 dark:border-slate-800/80">
             <div>
               <label className="block text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-                Target RTO (Seconds)
+                <Glossary term="RTO">Target RTO</Glossary> (Seconds)
               </label>
               <input
                 type="number"
@@ -162,7 +163,7 @@ export const ExperimentPanel: React.FC<ExperimentPanelProps> = ({ onViewHistory 
             </div>
             <div>
               <label className="block text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-                Target RPO (Max Lost Events)
+                <Glossary term="RPO">Target RPO</Glossary> (Max Lost Events)
               </label>
               <input
                 type="number"
@@ -280,7 +281,7 @@ export const ExperimentPanel: React.FC<ExperimentPanelProps> = ({ onViewHistory 
           <div className="grid grid-cols-3 gap-2 text-xs pt-3 border-t border-slate-200 dark:border-slate-800">
             <div className="p-2 rounded-lg bg-white/80 dark:bg-slate-900/80">
               <span className="text-[10px] text-slate-400 uppercase flex items-center gap-1">
-                <Timer size={10} /> RTO
+                <Timer size={10} /> <Glossary term="RTO">RTO</Glossary>
               </span>
               <span className="font-bold font-mono text-xs text-slate-900 dark:text-white">
                 {metrics?.rto !== undefined ? formatDuration(metrics.rto) : '--'}
@@ -289,7 +290,7 @@ export const ExperimentPanel: React.FC<ExperimentPanelProps> = ({ onViewHistory 
 
             <div className="p-2 rounded-lg bg-white/80 dark:bg-slate-900/80">
               <span className="text-[10px] text-slate-400 uppercase flex items-center gap-1">
-                <HardDrive size={10} /> RPO
+                <HardDrive size={10} /> <Glossary term="RPO">RPO</Glossary>
               </span>
               <span className="font-bold font-mono text-xs text-slate-900 dark:text-white">
                 {metrics?.rpo !== undefined ? formatDuration(metrics.rpo) : '--'}

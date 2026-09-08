@@ -66,7 +66,7 @@ export const handler = async (event) => {
         secondaryRequests: m.secondaryRequests ?? m.secondaryEventsCount ?? 0,
         avgLatency: m.avgLatency ?? 0,
         p95Latency: m.p95Latency ?? 0,
-        queueDepth: m.lostCount ?? 0,
+        queueDepth: m.queueDepth ?? m.pendingCount ?? 0,
         errorRate: m.totalRequests > 0 ? Math.round((m.failedCount / m.totalRequests) * 100) : 0,
         metrics: m
       };

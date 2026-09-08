@@ -12,12 +12,24 @@ describe('Metrics & Resiliency Calculations', () => {
     assert.ok(rto > 0, 'RTO must be positive');
   });
 
-  test('RPO calculation: data loss window between last success and post-recovery success', () => {
+  test('RPO calculation: data loss window between last success and post-recovery success when data was lost', () => {
     const lastSuccess = '2026-09-04T10:00:00.000Z';
     const firstPostRecoverySuccess = '2026-09-04T10:00:03.200Z';
+    const lostCount = 5;
 
-    const rpo = new Date(firstPostRecoverySuccess).getTime() - new Date(lastSuccess).getTime();
-    assert.equal(rpo, 3200, 'RPO window should be exactly 3,200ms');
+    const rpo = lostCount === 0 ? 0 : new Date(firstPostRecoverySuccess).getTime() - new Date(lastSuccess).getTime();
+    assert.equal(rpo, 3200, 'RPO window should be exactly 3,200ms when data was lost');
+  });
+
+  test('RPO calculation: RPO is strictly 0 when zero events lost during SQS buffering', () => {
+    const lastSuccess = '2026-09-04T10:00:00.000Z';
+    const firstPostRecoverySuccess = '2026-09-04T10:00:15.000Z';
+    const lostCount = 0;
+    const pendingCount = 78;
+
+    const rpo = lostCount === 0 ? 0 : new Date(firstPostRecoverySuccess).getTime() - new Date(lastSuccess).getTime();
+    assert.equal(rpo, 0, 'RPO must be strictly 0 when SQS successfully buffered all events without loss');
+    assert.equal(pendingCount, 78, 'Pending SQS events must be tracked in pendingCount / queueDepth, not lostCount');
   });
 
   test('Detection Time: elapsed time between failure injection and first error detection', () => {

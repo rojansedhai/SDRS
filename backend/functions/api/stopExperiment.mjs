@@ -45,7 +45,7 @@ export const handler = async (event) => {
     const rpoTargetEvents = experiment.targetRpoEvents ?? metrics.targetRpoEvents ?? 0;
 
     const rtoPass = metrics.rto !== undefined ? metrics.rto <= rtoTargetMs : true;
-    const rpoPass = metrics.failedCount <= rpoTargetEvents;
+    const rpoPass = (metrics.lostCount ?? 0) <= rpoTargetEvents;
     const consistencyPass = (metrics.dataConsistency ?? 100) >= 95;
     const hasRequests = metrics.totalRequests > 0;
 
