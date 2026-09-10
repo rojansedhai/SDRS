@@ -479,10 +479,15 @@ const ArchitectureDiagramContent: React.FC = () => {
               <AlertOctagon size={14} />
               <span>Failover Active: Traffic Rerouted to us-west-2</span>
             </div>
-          ) : hasFailure ? (
+          ) : (activeExperiment?.failureType === 'region-failure' && !activeExperiment?.recoveredAt) ? (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 animate-pulse">
               <AlertOctagon size={14} />
               <span>Primary Regional Outage Active</span>
+            </div>
+          ) : hasFailure ? (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 animate-pulse">
+              <AlertOctagon size={14} />
+              <span>Component Fault Active ({activeExperiment?.failureType || 'Outage'})</span>
             </div>
           ) : hasDegraded ? (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50">

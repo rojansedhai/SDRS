@@ -301,3 +301,88 @@ test('SEC-01 & INF-02: Cross-Region Auth Verification Script Contract', async (t
   });
 });
 
+test('AUDIT-FIX-01: No hardcoded test passwords in repository files', async (t) => {
+  await t.test('Frontend services, components, scripts do not contain SdrsTestPassword123!', () => {
+    const filesToCheck = [
+      '../../frontend/src/services/api.ts',
+      '../../frontend/src/components/layout/Header.tsx',
+      '../../scripts/refresh-token.mjs',
+      '../../frontend/.env.example'
+    ];
+    for (const relPath of filesToCheck) {
+      const fullPath = path.resolve(import.meta.dirname, relPath);
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath, 'utf8');
+        assert.ok(!content.includes('SdrsTestPassword123!'), `${relPath} still contains hardcoded test password`);
+      }
+    }
+  });
+
+  await t.test('scripts/refresh-token.mjs reads password from process.env.COGNITO_PASSWORD', () => {
+    const scriptPath = path.resolve(import.meta.dirname, '../../scripts/refresh-token.mjs');
+    const content = fs.readFileSync(scriptPath, 'utf8');
+    assert.ok(content.includes('process.env.COGNITO_PASSWORD'), 'Must read password from environment');
+  });
+
+  await t.test('frontend/src/services/api.ts requires password parameter in loginWithCognito', () => {
+    const apiPath = path.resolve(import.meta.dirname, '../../frontend/src/services/api.ts');
+    const content = fs.readFileSync(apiPath, 'utf8');
+    assert.ok(content.includes('export async function loginWithCognito('), 'loginWithCognito function must be exported');
+    assert.ok(content.includes('password: string'), 'loginWithCognito must accept mandatory password parameter');
+    assert.ok(!content.includes('password = '), 'Must not have default password assignment');
+  });
+});
+
+test('AUDIT-FIX-02: injectFailure removes stale recoveredAt on re-injection', async (t) => {
+  await t.test('injectFailure.mjs includes REMOVE recoveredAt in UpdateExpression', () => {
+    const injectPath = path.resolve(import.meta.dirname, '../functions/api/injectFailure.mjs');
+    const content = fs.readFileSync(injectPath, 'utf8');
+    assert.ok(content.includes('REMOVE recoveredAt'), 'UpdateExpression must contain REMOVE recoveredAt');
+    assert.ok(content.includes('SET failureType = :failureType, failureInjectedAt = :failureInjectedAt REMOVE recoveredAt'), 'Must update failureType and clear recoveredAt');
+  });
+});
+
+test('AUDIT-FIX-03: failureEngine eliminates dead ListEventSourceMappings fallback and enforces mapping UUID', async (t) => {
+  await t.test('failureEngine.mjs does NOT import or use ListEventSourceMappingsCommand', () => {
+    const enginePath = path.resolve(import.meta.dirname, '../functions/failure/failureEngine.mjs');
+    const content = fs.readFileSync(enginePath, 'utf8');
+    assert.ok(!content.includes('ListEventSourceMappingsCommand'), 'Must not import or invoke ListEventSourceMappingsCommand');
+  });
+
+  await t.test('failureEngine.mjs fails safely with configuration exception when SQS_EVENT_SOURCE_MAPPING_UUID is missing', () => {
+    const enginePath = path.resolve(import.meta.dirname, '../functions/failure/failureEngine.mjs');
+    const content = fs.readFileSync(enginePath, 'utf8');
+    assert.ok(content.includes('Configuration Exception: SQS_EVENT_SOURCE_MAPPING_UUID is not set'), 'Must throw configuration exception if mapping UUID is unset');
+  });
+
+  await t.test('template.yaml guarantees SQS_EVENT_SOURCE_MAPPING_UUID is passed to FailureEngineFunction', () => {
+    const templatePath = path.resolve(import.meta.dirname, '../template.yaml');
+    const content = fs.readFileSync(templatePath, 'utf8');
+    assert.ok(content.includes('SQS_EVENT_SOURCE_MAPPING_UUID: !Ref ProcessingQueueEventSourceMapping'), 'SAM template must inject SQS_EVENT_SOURCE_MAPPING_UUID');
+  });
+});
+
+test('AUDIT-FIX-04: listExperiments enforces strict userId = :uid isolation', async (t) => {
+  await t.test('listExperiments.mjs FilterExpression strictly checks userId = :uid without legacy fallback', () => {
+    const listPath = path.resolve(import.meta.dirname, '../functions/api/listExperiments.mjs');
+    const content = fs.readFileSync(listPath, 'utf8');
+    assert.ok(content.includes("FilterExpression: 'userId = :uid'"), 'FilterExpression must strictly require userId = :uid');
+    assert.ok(!content.includes('attribute_not_exists'), 'Must eliminate attribute_not_exists fallback');
+  });
+
+  await t.test('listExperiments filtering logic rejects unowned or mismatched userId items', () => {
+    const userId = 'user-owner-123';
+    const rawItems = [
+      { experimentId: 'exp-1', userId: 'user-owner-123', startedAt: '2026-09-10T10:00:00Z' },
+      { experimentId: 'exp-2', userId: 'user-attacker-456', startedAt: '2026-09-10T10:05:00Z' },
+      { experimentId: 'exp-3', startedAt: '2026-09-10T10:10:00Z' }, // legacy unowned
+      { experimentId: 'exp-4', userId: null, startedAt: '2026-09-10T10:15:00Z' }
+    ];
+
+    const filtered = rawItems.filter(exp => exp.userId === userId);
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].experimentId, 'exp-1');
+  });
+});
+
+

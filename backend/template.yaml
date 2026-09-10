@@ -285,6 +285,8 @@ Resources:
       EventSourceArn: !GetAtt ProcessingQueue.Arn
       FunctionName: !GetAtt EventProcessorFunction.Arn
       BatchSize: 10
+      ScalingConfig:
+        MaximumConcurrency: 2
       FunctionResponseTypes:
         - ReportBatchItemFailures
 
@@ -374,6 +376,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalConfigTable, !Ref ConfigTableName]
         - LambdaInvokePolicy:
             FunctionName: !Ref FailureEngineFunction
       Events:
@@ -395,6 +399,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateLocalTables, !Ref LocalExperimentsTable, !Ref ExperimentsTableName]
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateLocalTables, !Ref LocalConfigTable, !Ref ConfigTableName]
         - LambdaInvokePolicy:
             FunctionName: !Ref FailureEngineFunction
       Events:

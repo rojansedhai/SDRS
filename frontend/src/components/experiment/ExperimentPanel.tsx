@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useExperimentStore } from '../../store/experimentStore';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { formatDuration, formatPercentage } from '../../utils/formatters';
-import { Play, Square, RotateCcw, CheckCircle2, AlertTriangle, ShieldCheck, Clock, Timer, HardDrive, ShieldAlert } from 'lucide-react';
+import { Play, Square, RotateCcw, CheckCircle2, AlertTriangle, ShieldCheck, Clock, Timer, HardDrive, ShieldAlert, X } from 'lucide-react';
 import { Glossary } from '../onboarding/GlossaryTooltip';
 import type { FailureType } from '../../types/experiment';
 
@@ -45,7 +45,7 @@ const scenarioPresets: Record<string, { title: string; failureType: FailureType;
  * ExperimentPanel provides main experiment lifecycle controls with a high-end dev-tool aesthetic.
  */
 export const ExperimentPanel: React.FC<ExperimentPanelProps> = ({ onViewHistory }) => {
-  const { activeExperiment, startExperiment, stopExperiment, regionMode, setRegionMode } = useExperimentStore();
+  const { activeExperiment, startExperiment, stopExperiment, regionMode, setRegionMode, error, clearError } = useExperimentStore();
   const [experimentName, setExperimentName] = useState('');
   const [scenarioType, setScenarioType] = useState('custom');
   const [rtoTarget, setRtoTarget] = useState(60);
@@ -340,6 +340,21 @@ export const ExperimentPanel: React.FC<ExperimentPanelProps> = ({ onViewHistory 
           {regionMode === 'multi-region' ? 'Phase 2: Multi-Region' : 'Phase 1: Single Region'}
         </span>
       </div>
+
+      {error && (
+        <div className="mb-4 p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-start justify-between gap-2 animate-fade-in">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Experiment Execution Error</p>
+              <p className="mt-0.5 leading-relaxed">{error}</p>
+            </div>
+          </div>
+          <button onClick={clearError} className="text-rose-500 hover:text-rose-700 p-1" title="Dismiss error">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {(!activeExperiment || experimentStatus === 'idle') && renderIdle()}
       {activeExperiment && experimentStatus === 'running' && renderRunning()}

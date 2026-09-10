@@ -35,8 +35,8 @@ export const handler = async (event) => {
       currentExperimentId = simEvent.experimentId || currentExperimentId;
 
       if (isDdbThrottle) {
-        // Add 2s throttle latency
-        await sleep(2000);
+        // Add 150ms throttle latency (simulating backpressure/retry without tying up Lambda concurrency)
+        await sleep(150);
         // 50% failure rate simulating ProvisionedThroughputExceededException
         if (Math.random() < 0.5) {
           const throttleError = new Error('ProvisionedThroughputExceededException: The level of configured provisioned throughput for the table was exceeded.');

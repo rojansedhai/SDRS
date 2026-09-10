@@ -55,7 +55,7 @@ export const handler = async (event) => {
     const updateParams = {
       TableName: TABLE_NAMES.EXPERIMENTS,
       Key: { experimentId },
-      UpdateExpression: 'SET #st = :status, stoppedAt = :stoppedAt, #m = :metrics, isPass = :isPass, #res = :result',
+      UpdateExpression: 'SET #st = :status, stoppedAt = :stoppedAt, #m = :metrics, isPass = :isPass, #res = :result, resilienceScore = :score',
       ExpressionAttributeNames: {
         '#st': 'status',
         '#res': 'result',
@@ -66,7 +66,8 @@ export const handler = async (event) => {
         ':stoppedAt': stoppedAt,
         ':metrics': metrics,
         ':isPass': isPass,
-        ':result': resultStatus
+        ':result': resultStatus,
+        ':score': metrics.resilienceScore ?? 0
       },
       ReturnValues: 'ALL_NEW'
     };

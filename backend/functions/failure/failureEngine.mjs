@@ -2,7 +2,6 @@ import {
   LambdaClient,
   PutFunctionConcurrencyCommand,
   DeleteFunctionConcurrencyCommand,
-  ListEventSourceMappingsCommand,
   UpdateEventSourceMappingCommand
 } from '@aws-sdk/client-lambda';
 import {
@@ -10,7 +9,7 @@ import {
   DisableRuleCommand,
   EnableRuleCommand
 } from '@aws-sdk/client-eventbridge';
-import { putItem, getItem } from '../shared/dynamodb.mjs';
+import { putItem } from '../shared/dynamodb.mjs';
 import { TABLE_NAMES, FAILURE_TYPES } from '../shared/constants.mjs';
 
 const lambdaClient = new LambdaClient({ region: process.env.REGION || 'us-east-1' });
@@ -36,7 +35,7 @@ export const handler = async (event) => {
   // Strictly bind target resources to environment variables
   const targetLambda = process.env.EVENT_PROCESSOR_FUNCTION_NAME;
   const targetRule = process.env.EVENT_BRIDGE_RULE_NAME ? process.env.EVENT_BRIDGE_RULE_NAME.split('|').pop() : '';
-  const targetBus = process.env.EVENT_BUS_NAME;
+  const targetBus = process.env.EVENT_BUS_NAME || 'sdrs-event-bus';
   const targetMappingUuid = process.env.SQS_EVENT_SOURCE_MAPPING_UUID;
 
   if (!targetLambda) {
@@ -60,30 +59,14 @@ export const handler = async (event) => {
 
         case 'sqs-backlog':
           console.log(`[Chaos] Disabling SQS Event Source Mapping for target function: ${targetLambda}`);
-          if (targetMappingUuid) {
-            await lambdaClient.send(new UpdateEventSourceMappingCommand({
-              UUID: targetMappingUuid,
-              Enabled: false
-            }));
-            console.log(`[Chaos] Explicit SQS mapping disabled: ${targetMappingUuid}`);
-          } else {
-            const mappings = await lambdaClient.send(new ListEventSourceMappingsCommand({
-              FunctionName: targetLambda
-            }));
-            const mapping = mappings.EventSourceMappings?.find(m => m.EventSourceArn?.includes('SQS') || m.EventSourceArn?.includes('ProcessingQueue'));
-            if (mapping) {
-              await lambdaClient.send(new UpdateEventSourceMappingCommand({
-                UUID: mapping.UUID,
-                Enabled: false
-              }));
-              await putItem({
-                TableName: TABLE_NAMES.CONFIG,
-                Item: { configKey: 'original-sqs-mapping-uuid', uuid: mapping.UUID, experimentId }
-              });
-            } else {
-              console.warn('[Chaos] No active SQS Event Source Mapping found to disable.');
-            }
+          if (!targetMappingUuid) {
+            throw new Error('Configuration Exception: SQS_EVENT_SOURCE_MAPPING_UUID is not set. SQS event source mapping cannot be resolved.');
           }
+          await updateEventSourceMappingWithRetry({
+            UUID: targetMappingUuid,
+            Enabled: false
+          });
+          console.log(`[Chaos] Explicit SQS mapping disabled: ${targetMappingUuid}`);
           break;
 
         case 'ddb-throttle':
@@ -143,38 +126,14 @@ export const handler = async (event) => {
 
       // 2. Restore SQS Event Source Mapping
       try {
-        if (targetMappingUuid) {
-          await lambdaClient.send(new UpdateEventSourceMappingCommand({
-            UUID: targetMappingUuid,
-            Enabled: true
-          }));
-          console.log(`[Recovery] Explicit SQS mapping re-enabled: ${targetMappingUuid}`);
-        } else {
-          const uuidConfig = await getItem({
-            TableName: TABLE_NAMES.CONFIG,
-            Key: { configKey: 'original-sqs-mapping-uuid' }
-          });
-
-          if (uuidConfig.Item?.uuid) {
-            await lambdaClient.send(new UpdateEventSourceMappingCommand({
-              UUID: uuidConfig.Item.uuid,
-              Enabled: true
-            }));
-            console.log(`[Recovery] SQS mapping enabled for UUID: ${uuidConfig.Item.uuid}`);
-          } else {
-            const mappings = await lambdaClient.send(new ListEventSourceMappingsCommand({
-              FunctionName: targetLambda
-            }));
-            const mapping = mappings.EventSourceMappings?.find(m => m.EventSourceArn?.includes('SQS') || m.EventSourceArn?.includes('ProcessingQueue'));
-            if (mapping && !mapping.State?.includes('Enabled')) {
-              await lambdaClient.send(new UpdateEventSourceMappingCommand({
-                UUID: mapping.UUID,
-                Enabled: true
-              }));
-              console.log(`[Recovery] SQS mapping re-enabled via fallback search: ${mapping.UUID}`);
-            }
-          }
+        if (!targetMappingUuid) {
+          throw new Error('Configuration Exception: SQS_EVENT_SOURCE_MAPPING_UUID is not set. SQS event source mapping cannot be resolved.');
         }
+        await updateEventSourceMappingWithRetry({
+          UUID: targetMappingUuid,
+          Enabled: true
+        });
+        console.log(`[Recovery] Explicit SQS mapping re-enabled: ${targetMappingUuid}`);
       } catch (e) {
         console.warn('Failed to restore SQS mapping:', e.message);
       }

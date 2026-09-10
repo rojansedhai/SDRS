@@ -24,8 +24,10 @@ interface ExperimentState {
   metricsHistory: MetricSnapshot[];
   isLoading: boolean;
   isDemoMode: boolean;
+  error: string | null;
 
   // Actions
+  clearError: () => void;
   setRegionMode: (mode: 'single-region' | 'multi-region') => void;
   startExperiment: (
     name: string,
@@ -77,11 +79,14 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
   metricsHistory: isDemo ? createInitialHistory() : [],
   isLoading: false,
   isDemoMode: isDemo,
+  error: null,
+
+  clearError: () => set({ error: null }),
 
   setRegionMode: (mode) => set({ regionMode: mode }),
 
   startExperiment: async (name, scenario = 'custom', options = {}) => {
-    set({ isLoading: true });
+    set({ isLoading: true, error: null });
     const targetRtoSeconds = options.targetRtoSeconds ?? 60;
     const targetRpoEvents = options.targetRpoEvents ?? 0;
     const mode = options.regionMode || get().regionMode;
@@ -145,19 +150,31 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
         set({
           activeExperiment: result,
           regionMode: mode,
+          serviceStatuses: simulateRecovery(),
+          secondaryServiceStatuses: {
+            'api-gateway': 'healthy',
+            eventbridge: 'healthy',
+            sqs: 'healthy',
+            lambda: 'healthy'
+          },
+          failoverActive: false,
+          serviceRoles: { primary: 'active', secondary: 'standby' },
+          metricsHistory: [],
           isLoading: false
         });
       }
-    } catch (error) {
-      console.error(error);
-      set({ isLoading: false });
+    } catch (error: any) {
+      console.error('Failed to start experiment:', error);
+      const msg = error?.message || 'Failed to start experiment';
+      set({ isLoading: false, error: msg });
+      alert(`Failed to start experiment:\n\n${msg}`);
     }
   },
 
   stopExperiment: async () => {
     const active = get().activeExperiment;
     if (!active) return;
-    set({ isLoading: true });
+    set({ isLoading: true, error: null });
 
     try {
       if (get().isDemoMode) {
@@ -202,9 +219,11 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
           isLoading: false
         }));
       }
-    } catch (error) {
-      console.error(error);
-      set({ isLoading: false });
+    } catch (error: any) {
+      console.error('Failed to stop experiment:', error);
+      const msg = error?.message || 'Failed to stop experiment';
+      set({ isLoading: false, error: msg });
+      alert(`Failed to stop experiment:\n\n${msg}`);
     }
   },
 
@@ -239,15 +258,23 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
         }
       });
     } else {
-      await api.injectFailure(active.experimentId, type);
-      set({
-        serviceStatuses: simulateFailure(type),
-        activeExperiment: {
-          ...active,
-          failureType: type,
-          failureInjectedAt: new Date().toISOString()
-        }
-      });
+      try {
+        set({ isLoading: true });
+        await api.injectFailure(active.experimentId, type);
+        set({
+          serviceStatuses: simulateFailure(type),
+          activeExperiment: {
+            ...active,
+            failureType: type,
+            failureInjectedAt: new Date().toISOString()
+          },
+          isLoading: false
+        });
+      } catch (err: any) {
+        console.error('Failed to inject failure:', err);
+        set({ isLoading: false });
+        alert(`Failed to inject failure: ${err.message || err}`);
+      }
     }
   },
 
@@ -317,17 +344,25 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
         }
       });
     } else {
-      await api.restoreService(active.experimentId);
-      set({
-        serviceStatuses: simulateRecovery(),
-        failoverActive: false,
-        serviceRoles: { primary: 'active', secondary: 'standby' },
-        activeExperiment: {
-          ...active,
-          failureType: undefined,
-          recoveredAt: new Date().toISOString()
-        }
-      });
+      try {
+        set({ isLoading: true });
+        await api.restoreService(active.experimentId);
+        set({
+          serviceStatuses: simulateRecovery(),
+          failoverActive: false,
+          serviceRoles: { primary: 'active', secondary: 'standby' },
+          activeExperiment: {
+            ...active,
+            failureType: undefined,
+            recoveredAt: new Date().toISOString()
+          },
+          isLoading: false
+        });
+      } catch (err: any) {
+        console.error('Failed to restore service:', err);
+        set({ isLoading: false });
+        alert(`Failed to restore service: ${err.message || err}`);
+      }
     }
   },
 

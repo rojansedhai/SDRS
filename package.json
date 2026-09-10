@@ -7,7 +7,8 @@
     "test": "npm --prefix backend test",
     "test:backend": "npm --prefix backend test",
     "build:frontend": "npm --prefix frontend run build",
-    "dev": "npm --prefix frontend run dev"
+    "dev": "npm --prefix frontend run dev",
+    "auth:refresh": "node scripts/refresh-token.mjs"
   }
 }
 

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Shield, Sun, Moon, Activity, Cloud, Key, X, Check } from 'lucide-react';
+import { Shield, Sun, Moon, Activity, Cloud, Key, X, Check, Loader2, AlertCircle } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { useExperimentStore } from '../../store/experimentStore';
-import { getAuthToken, setAuthToken } from '../../services/api';
+import { getAuthToken, setAuthToken, isTokenExpired, getTokenDetails, loginWithCognito } from '../../services/api';
 
 /**
  * Top header bar with real-time status telemetry, JWT auth modal, and theme toggle.
@@ -13,8 +13,16 @@ export const Header: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [tokenInput, setTokenInput] = useState(getAuthToken());
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [usernameInput, setUsernameInput] = useState('testuser@sdrs.internal');
+  const [passwordInput, setPasswordInput] = useState('');
 
   const isRunning = activeExperiment?.status === 'running';
+  const currentToken = getAuthToken();
+  const tokenDetails = getTokenDetails(currentToken);
+  const isExpired = isTokenExpired(currentToken);
+  const hasToken = !!currentToken && !isExpired;
 
   const handleSaveToken = () => {
     setAuthToken(tokenInput.trim());
@@ -23,6 +31,30 @@ export const Header: React.FC = () => {
       setSavedSuccess(false);
       setIsAuthOpen(false);
     }, 800);
+  };
+
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!passwordInput) {
+      setLoginError('Please enter your Cognito account password.');
+      return;
+    }
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const newToken = await loginWithCognito(usernameInput.trim(), passwordInput);
+      setTokenInput(newToken);
+      setPasswordInput('');
+      setSavedSuccess(true);
+      setTimeout(() => {
+        setSavedSuccess(false);
+        setIsAuthOpen(false);
+      }, 1000);
+    } catch (err: any) {
+      setLoginError(err?.message || 'Login failed');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   return (
@@ -68,16 +100,21 @@ export const Header: React.FC = () => {
             </span>
           ) : (
             <button
-              onClick={() => setIsAuthOpen(true)}
+              onClick={() => {
+                setTokenInput(getAuthToken());
+                setIsAuthOpen(true);
+              }}
               className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-full border transition-all ${
-                tokenInput
+                hasToken
                   ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-                  : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 animate-pulse'
+                  : currentToken && isExpired
+                    ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                    : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 animate-pulse'
               }`}
-              title="Configure Cognito JWT Bearer Token"
+              title={hasToken ? `JWT Active (Expires in ~${tokenDetails?.exp ? Math.max(0, Math.round((tokenDetails.exp - Date.now() / 1000) / 60)) : 0}m)` : 'Configure Cognito JWT Bearer Token'}
             >
               <Key size={12} />
-              <span>{tokenInput ? 'JWT Active' : 'Auth Required'}</span>
+              <span>{hasToken ? 'JWT Active' : currentToken && isExpired ? 'Token Expired' : 'Auth Required'}</span>
             </button>
           )}
 
@@ -100,7 +137,7 @@ export const Header: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-base">
                 <Key className="text-indigo-600" size={18} />
-                <span>API Gateway JWT Authentication</span>
+                <span>Cognito JWT Authentication</span>
               </div>
               <button
                 onClick={() => setIsAuthOpen(false)}
@@ -111,23 +148,101 @@ export const Header: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              When connected to live AWS (<code className="text-indigo-600 dark:text-indigo-400">VITE_DEMO_MODE=false</code>), all mutation and data retrieval endpoints require a valid Cognito JWT Bearer Token (<code className="text-indigo-600 dark:text-indigo-400">Authorization: Bearer &lt;token&gt;</code>).
+              When connected to live AWS (<code className="text-indigo-600 dark:text-indigo-400">VITE_DEMO_MODE=false</code>), API Gateway HTTP routes require an authoritative Cognito Bearer Token.
             </p>
+
+            {/* Cognito Authentication Form */}
+            <form onSubmit={handleLogin} className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-2.5">
+              <span className="text-xs font-bold text-indigo-950 dark:text-indigo-200 block">
+                Cognito User Authentication
+              </span>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                  Username / Email:
+                </label>
+                <input
+                  type="text"
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                  placeholder="testuser@sdrs.internal"
+                  className="w-full text-xs font-mono px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                  Password:
+                </label>
+                <input
+                  type="password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  placeholder="Enter account password"
+                  className="w-full text-xs font-mono px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-sm shadow-indigo-500/20"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Signing in to Cognito...</span>
+                  </>
+                ) : (
+                  <>
+                    <Key size={13} />
+                    <span>Sign In to Acquire Token</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {loginError && (
+              <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            {/* Token Status Info */}
+            {tokenDetails && (
+              <div className={`p-2.5 rounded-lg text-xs border ${
+                isExpired
+                  ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+              }`}>
+                <div className="flex items-center justify-between font-mono text-[11px]">
+                  <span>Status: {isExpired ? '⚠️ EXPIRED' : '✅ ACTIVE'}</span>
+                  {tokenDetails.exp && (
+                    <span>
+                      {isExpired
+                        ? `Expired at ${new Date(tokenDetails.exp * 1000).toLocaleTimeString()}`
+                        : `Expires ~${Math.max(0, Math.round((tokenDetails.exp - Date.now() / 1000) / 60))}m`}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Cognito ID / Access Token:
+                Or Paste Custom ID / Access Token:
               </label>
               <textarea
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
                 placeholder="eyJraWQiOi..."
-                rows={4}
-                className="w-full text-xs font-mono p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                rows={3}
+                className="w-full text-xs font-mono p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
               />
             </div>
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between pt-1">
               <button
                 type="button"
                 onClick={() => {
@@ -145,7 +260,7 @@ export const Header: React.FC = () => {
                   onClick={() => setIsAuthOpen(false)}
                   className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700"
                 >
-                  Cancel
+                  Close
                 </button>
                 <button
                   type="button"

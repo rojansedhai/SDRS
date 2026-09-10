@@ -13,7 +13,7 @@ export const handler = async (event) => {
   try {
     const command = new ScanCommand({
       TableName: TABLE_NAMES.EXPERIMENTS,
-      FilterExpression: 'attribute_not_exists(userId) OR userId = :uid',
+      FilterExpression: 'userId = :uid',
       ExpressionAttributeValues: {
         ':uid': userId
       },
@@ -21,7 +21,7 @@ export const handler = async (event) => {
     });
     
     const result = await docClient.send(command);
-    let experiments = (result.Items || []).filter(exp => !exp.userId || exp.userId === userId);
+    let experiments = (result.Items || []).filter(exp => exp.userId === userId);
     
     // Sort by startedAt descending
     experiments.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());

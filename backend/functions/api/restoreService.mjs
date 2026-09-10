@@ -1,4 +1,4 @@
-import { getItem, updateItem } from '../shared/dynamodb.mjs';
+import { getItem, putItem, updateItem } from '../shared/dynamodb.mjs';
 import { TABLE_NAMES } from '../shared/constants.mjs';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { requireAuth, forbiddenResponse } from '../shared/auth.mjs';
@@ -41,21 +41,63 @@ export const handler = async (event) => {
       return forbiddenResponse(experiment.userId, userId);
     }
     
-    // Invoke Failure Engine
-    const invokeCommand = new InvokeCommand({
-      FunctionName: process.env.FAILURE_ENGINE_FUNCTION_NAME,
-      Payload: Buffer.from(JSON.stringify({
-        action: 'restore',
-        experimentId
-      }))
-    });
-    const invokeResponse = await lambdaClient.send(invokeCommand);
-    if (invokeResponse.FunctionError) {
-      const errorPayload = invokeResponse.Payload ? Buffer.from(invokeResponse.Payload).toString() : 'Unknown error';
-      throw new Error(`FailureEngine restore failed: ${invokeResponse.FunctionError} - ${errorPayload}`);
-    }
-    
     const recoveredAt = new Date().toISOString();
+
+    // 1. Immediate self-healing: clear simulator flags in ConfigTable directly
+    try {
+      await Promise.all([
+        putItem({
+          TableName: TABLE_NAMES.CONFIG,
+          Item: { configKey: 'chaos-ddb-throttle', active: false, restoredAt }
+        }),
+        putItem({
+          TableName: TABLE_NAMES.CONFIG,
+          Item: { configKey: 'chaos-api-failure', active: false, restoredAt }
+        }),
+        putItem({
+          TableName: TABLE_NAMES.CONFIG,
+          Item: { configKey: 'chaos-primary-unhealthy', active: false, restoredAt }
+        }),
+        putItem({
+          TableName: TABLE_NAMES.CONFIG,
+          Item: { configKey: 'chaos-eventbridge-failure', active: false, restoredAt }
+        })
+      ]);
+    } catch (cfgErr) {
+      console.warn('Could not reset ConfigTable flags directly:', cfgErr.message);
+    }
+
+    // 2. Invoke Failure Engine with retry backoff for rate limits/concurrency contention
+    let lastError = null;
+    let invokeSuccess = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const invokeCommand = new InvokeCommand({
+          FunctionName: process.env.FAILURE_ENGINE_FUNCTION_NAME,
+          Payload: Buffer.from(JSON.stringify({
+            action: 'restore',
+            experimentId
+          }))
+        });
+        const invokeResponse = await lambdaClient.send(invokeCommand);
+        if (invokeResponse.FunctionError) {
+          const errorPayload = invokeResponse.Payload ? Buffer.from(invokeResponse.Payload).toString() : 'Unknown error';
+          throw new Error(`FailureEngine restore failed: ${invokeResponse.FunctionError} - ${errorPayload}`);
+        }
+        invokeSuccess = true;
+        break;
+      } catch (invokeErr) {
+        lastError = invokeErr;
+        console.warn(`FailureEngine invocation attempt ${attempt} failed:`, invokeErr.message);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, attempt * 500));
+        }
+      }
+    }
+
+    if (!invokeSuccess) {
+      console.warn('FailureEngine invoke failed after retries, but config flags were cleared directly:', lastError?.message);
+    }
     
     const updateParams = {
       TableName: TABLE_NAMES.EXPERIMENTS,

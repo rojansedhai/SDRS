@@ -72,7 +72,7 @@ export const handler = async (event) => {
     const updateParams = {
       TableName: TABLE_NAMES.EXPERIMENTS,
       Key: { experimentId },
-      UpdateExpression: 'SET failureType = :failureType, failureInjectedAt = :failureInjectedAt',
+      UpdateExpression: 'SET failureType = :failureType, failureInjectedAt = :failureInjectedAt REMOVE recoveredAt',
       ExpressionAttributeValues: {
         ':failureType': failureType,
         ':failureInjectedAt': failureInjectedAt
