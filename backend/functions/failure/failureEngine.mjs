@@ -18,6 +18,26 @@ const ebClient = new EventBridgeClient({ region: process.env.REGION || 'us-east-
 const ALLOWED_FAILURES = Object.values(FAILURE_TYPES);
 
 /**
+ * Resilient helper to update SQS event source mapping with retry on resource conflict.
+ */
+async function updateEventSourceMappingWithRetry(params, maxRetries = 3) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await lambdaClient.send(new UpdateEventSourceMappingCommand(params));
+    } catch (err) {
+      lastErr = err;
+      if (['ResourceConflictException', 'ResourceInUseException', 'TooManyRequestsException'].includes(err.name) && attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, attempt * 1000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Hardened FailureEngine handler enforcing strict invariants:
  * 1. Only allowed simulator failure types can be targeted.
  * 2. Target functions, rules, and SQS event source mapping UUIDs are strictly bound to CloudFormation environment variables.

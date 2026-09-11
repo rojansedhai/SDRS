@@ -103,7 +103,10 @@ export async function loginWithCognito(
     throw new Error('Username and password are required for authentication.');
   }
 
-  const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID || 'tdtqm22es47p0244be0goocbg';
+  const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
+  if (!clientId) {
+    throw new Error('VITE_COGNITO_CLIENT_ID is not configured in environment variables.');
+  }
   const region = (import.meta.env.VITE_COGNITO_USER_POOL_ID || 'us-east-1').split('_')[0] || 'us-east-1';
 
   const res = await fetch(`https://cognito-idp.${region}.amazonaws.com/`, {

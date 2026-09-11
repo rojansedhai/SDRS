@@ -27,7 +27,7 @@ export const mockExperiments: Experiment[] = [
       failoverTime: 4000,
       recoveryTime: 25000,
       totalRequests: 2450,
-      successCount: 2450,
+      successCount: 2380,
       failedCount: 70,
       duplicateCount: 12,
       lostCount: 0,

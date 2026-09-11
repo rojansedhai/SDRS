@@ -9,10 +9,12 @@ export function calculateRPO(lastSuccessBeforeFailure: string, firstSuccessAfter
 export function getMetricStatus(metricName: string, value: number): 'good' | 'warning' | 'critical' {
   switch (metricName) {
     case 'RTO':
+    case 'rto':
       if (value < 30000) return 'good';
       if (value < 60000) return 'warning';
       return 'critical';
     case 'RPO':
+    case 'rpo':
       if (value < 10000) return 'good';
       if (value < 30000) return 'warning';
       return 'critical';

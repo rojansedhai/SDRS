@@ -42,6 +42,7 @@ export const handler = async (event) => {
     }
     
     const recoveredAt = new Date().toISOString();
+    const restoredAt = recoveredAt;
 
     // 1. Immediate self-healing: clear simulator flags in ConfigTable directly
     try {
