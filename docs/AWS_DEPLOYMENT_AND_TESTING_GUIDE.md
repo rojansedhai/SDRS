@@ -281,7 +281,7 @@ node .\scripts\test-cross-region-auth.mjs --primary-url $PrimaryApiUrl --seconda
 ```
 
 ### Step 24: Re-run the Security Audit Suite
-Review [`docs/SECURITY_AUDIT_REPORT.md`](./SECURITY_AUDIT_REPORT.md) and run all 59 local unit and security invariant tests:
+Review [`docs/SECURITY_AUDIT_REPORT.md`](./SECURITY_AUDIT_REPORT.md) and run all 73 local unit and security invariant tests:
 ```powershell
 npm test
 ```

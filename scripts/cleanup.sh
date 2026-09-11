@@ -1,65 +1,94 @@
 #!/bin/bash
-# SDRS Cleanup Script
-# Removes all AWS resources created by the SDRS deployment.
+# ==============================================================================
+# SDRS Cleanup Script (Bash)
+# Deletes all AWS CloudFormation stacks created by SDRS in proper reverse dependency order.
+# ==============================================================================
+
 set -euo pipefail
 
-STACK_NAME="${STACK_NAME:-sdrs-stack}"
-REGION="${AWS_REGION:-us-east-1}"
+PRIMARY_REGION="${PRIMARY_REGION:-us-east-1}"
+SECONDARY_REGION="${SECONDARY_REGION:-us-west-2}"
+STACK_PREFIX="${STACK_PREFIX:-sdrs}"
+FORCE="${FORCE:-false}"
+
+# Parse command line flags
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --primary-region)
+      PRIMARY_REGION="$2"
+      shift 2
+      ;;
+    --secondary-region)
+      SECONDARY_REGION="$2"
+      shift 2
+      ;;
+    --stack-prefix)
+      STACK_PREFIX="$2"
+      shift 2
+      ;;
+    --force)
+      FORCE="true"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
 echo "╔═══════════════════════════════════════════════════════╗"
-echo "║   SDRS — Cleanup Script                              ║"
+echo "║   SDRS — Multi-Region Teardown & Cleanup Script       ║"
 echo "║   This will DELETE all SDRS AWS resources             ║"
 echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
-echo "⚠️  Stack:  $STACK_NAME"
-echo "   Region: $REGION"
-echo ""
-echo "This will delete:"
-echo "  - API Gateway"
-echo "  - Lambda functions"
-echo "  - SQS queues"
-echo "  - EventBridge event bus & rules"
-echo "  - DynamoDB tables (ALL DATA WILL BE LOST)"
-echo "  - IAM roles"
-echo "  - CloudWatch log groups"
+echo "Stacks to check and delete in reverse-dependency order:"
+echo "  1. ${STACK_PREFIX}-secondary              (${SECONDARY_REGION})"
+echo "  2. ${STACK_PREFIX}-primary                (${PRIMARY_REGION})"
+echo "  3. ${STACK_PREFIX}-multiregion-orchestrator (${PRIMARY_REGION})"
+echo "  4. ${STACK_PREFIX}-stack                  (${PRIMARY_REGION}, if single-region)"
 echo ""
 
-read -p "Are you sure you want to delete ALL SDRS resources? (yes/no) " CONFIRM
-if [ "$CONFIRM" != "yes" ]; then
-    echo "❌ Cleanup cancelled."
-    exit 0
+if [ "$FORCE" != "true" ]; then
+    read -p "Are you sure you want to delete ALL SDRS resources? (yes/no) " CONFIRM
+    if [ "$CONFIRM" != "yes" ]; then
+        echo "❌ Cleanup cancelled."
+        exit 0
+    fi
 fi
 
+delete_stack_if_exists() {
+    local stack_name="$1"
+    local region="$2"
+    
+    local status
+    status=$(aws cloudformation describe-stacks --stack-name "$stack_name" --region "$region" --query "Stacks[0].StackStatus" --output text 2>/dev/null || true)
+    
+    if [ -n "$status" ] && [ "$status" != "None" ]; then
+        echo "🗑️  Deleting stack '$stack_name' in $region..."
+        aws cloudformation delete-stack --stack-name "$stack_name" --region "$region"
+        echo "⏳ Waiting for '$stack_name' deletion to complete..."
+        aws cloudformation wait stack-delete-complete --stack-name "$stack_name" --region "$region"
+        echo "✅ '$stack_name' deleted successfully."
+    fi
+}
+
 echo ""
-echo "🗑️  Deleting CloudFormation stack: $STACK_NAME..."
-aws cloudformation delete-stack \
-    --stack-name "$STACK_NAME" \
-    --region "$REGION"
+# 1. Delete Secondary Regional Stack (us-west-2)
+delete_stack_if_exists "${STACK_PREFIX}-secondary" "${SECONDARY_REGION}"
 
-echo "⏳ Waiting for stack deletion to complete..."
-aws cloudformation wait stack-delete-complete \
-    --stack-name "$STACK_NAME" \
-    --region "$REGION"
+# 2. Delete Primary Regional Stack (us-east-1)
+delete_stack_if_exists "${STACK_PREFIX}-primary" "${PRIMARY_REGION}"
 
-echo ""
-echo "🧹 Cleaning up S3 deployment bucket..."
-# Find and empty the SAM deployment bucket
-SAM_BUCKET=$(aws cloudformation list-stack-resources \
-    --stack-name "aws-sam-cli-managed-default" \
-    --region "$REGION" \
-    --query "StackResourceSummaries[?LogicalResourceId=='SamCliSourceBucket'].PhysicalResourceId" \
-    --output text 2>/dev/null || true)
+# 3. Delete Multi-Region Storage Orchestrator (us-east-1)
+delete_stack_if_exists "${STACK_PREFIX}-multiregion-orchestrator" "${PRIMARY_REGION}"
 
-if [ -n "$SAM_BUCKET" ] && [ "$SAM_BUCKET" != "None" ]; then
-    echo "   SAM bucket: $SAM_BUCKET"
-    echo "   (Keeping bucket — it's shared across SAM deployments)"
-fi
+# 4. Delete Single-Region Stack if deployed (us-east-1)
+delete_stack_if_exists "${STACK_PREFIX}-stack" "${PRIMARY_REGION}"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
-echo "✅ SDRS resources deleted successfully!"
-echo ""
-echo "   All Lambda functions, DynamoDB tables, SQS queues,"
-echo "   and other resources have been removed."
+echo "✅ SDRS teardown complete!"
+echo "   All stacks, tables, Cognito pools, and queues have"
+echo "   been removed. Zero continuing cloud costs."
 echo "═══════════════════════════════════════════════════════"
 

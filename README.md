@@ -7,7 +7,7 @@ An open-source, interactive web application that helps developers understand how
 ![React](https://img.shields.io/badge/React-18-61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6)
 ![Node](https://img.shields.io/badge/Node.js-22.x-green)
-![Tests](https://img.shields.io/badge/Tests-59%20Passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-73%20Passing-brightgreen)
 
 > 📘 Read the full **[VALIDATION_REPORT.md](./VALIDATION_REPORT.md)** for our complete technical compliance audit, bug-fix log, and test results.  
 > 🌐 Read the comprehensive **[docs/MULTI_REGION.md](./docs/MULTI_REGION.md)** for Multi-Region Disaster Recovery architecture, runbooks, and Route 53 failover mechanics.  
@@ -98,8 +98,8 @@ See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for in-depth system design, idempot
 Run the application completely offline:
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/sdrs.git
-cd sdrs
+git clone https://github.com/rojansedhai/SDRS.git
+cd SDRS
 
 # Install all dependencies
 npm install
@@ -117,7 +117,7 @@ Open **http://localhost:3000** in your browser (default configured port; API Gat
 
 Run the automated test suite locally:
 ```bash
-# Run unit, calculation & security invariant tests (59/59 tests pass)
+# Run unit, calculation & security invariant tests (73/73 tests pass)
 npm test
 
 # Run offline smoke test script (PowerShell)

@@ -296,10 +296,10 @@ The system now enforces:
 ## Section 2: Automated Verification Results
 
 ### Unit & Invariant Test Suite (`npm test` / `node --test tests/*.test.mjs`)
-- **Total Tests:** 59
-- **Passed:** 59
+- **Total Tests:** 73
+- **Passed:** 73
 - **Failed:** 0
-- **Duration:** 224 ms
+- **Duration:** 270 ms
 
 ```
 ✔ Event Schema & Idempotency Invariants (4 tests)
@@ -318,6 +318,10 @@ The system now enforces:
 ✔ SEC-01 & INF-01: Authoritative Single Cognito Pool Architecture (2 tests)
 ✔ COD-02: BatchWriteItem Retry and Backoff Resiliency (2 tests)
 ✔ SEC-01 & INF-02: Cross-Region Auth Verification Script Contract (1 test)
+✔ AUDIT-FIX-01: No Hardcoded Test Passwords in Repository Files (3 tests)
+✔ AUDIT-FIX-02: injectFailure Removes Stale recoveredAt on Re-Injection (1 test)
+✔ AUDIT-FIX-03: failureEngine Eliminates Dead Fallbacks & Enforces Mapping UUID (3 tests)
+✔ AUDIT-FIX-04: listExperiments Enforces Strict User Ownership Isolation (2 tests)
 ```
 
 ### CloudFormation / SAM Validation

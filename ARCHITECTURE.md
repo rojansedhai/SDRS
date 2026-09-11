@@ -71,8 +71,8 @@ SDRS supports two execution modes:
 3. **Failure Engine Lambda** applies the controlled failure:
    - **Lambda failure** (`chaos-lambda-failure`): Sets reserved concurrency to 0 via `PutFunctionConcurrency`.
    - **SQS backlog** (`chaos-sqs-backlog`): Disables the Event Source Mapping via `UpdateEventSourceMapping`.
-   - **DynamoDB throttle** (`chaos-ddb-throttle`): Sets chaos flag in `ExperimentsTable`; processor simulates `ProvisionedThroughputExceededException`.
-   - **API failure** (`chaos-api-failure`): Sets chaos flag in `ExperimentsTable`; ingestion handler returns HTTP 500.
+   - **DynamoDB throttle** (`chaos-ddb-throttle`): Sets chaos flag in `ConfigTable`; processor simulates `ProvisionedThroughputExceededException`.
+   - **API failure** (`chaos-api-failure`): Sets chaos flag in `ConfigTable`; ingestion handler returns HTTP 500.
    - **EventBridge failure** (`chaos-eb-failure`): Disables the EventBridge rule via `DisableRule`.
 4. Workload continues or accumulates; telemetry detects degradation and marks services 🔴.
 
@@ -248,8 +248,8 @@ All failure injection is **safe, scoped, and reversible**. No resources are dele
 |---------------------|----------------------------------------|---------------------------------|------------|
 | Lambda Failure      | Set reserved concurrency to 0          | `PutFunctionConcurrency`        | ✅ `DeleteFunctionConcurrency` |
 | SQS Backlog         | Disable event source mapping           | `UpdateEventSourceMapping`      | ✅ Re-enable mapping |
-| DynamoDB Throttle   | Set chaos flag in `ExperimentsTable`   | `UpdateItem` on config record   | ✅ Remove flag |
-| API Failure         | Set chaos flag in `ExperimentsTable`   | `UpdateItem` on config record   | ✅ Remove flag |
+| DynamoDB Throttle   | Set chaos flag in `ConfigTable`        | `PutItem` on config record      | ✅ Remove flag |
+| API Failure         | Set chaos flag in `ConfigTable`        | `PutItem` on config record      | ✅ Remove flag |
 | EventBridge Failure | Disable EventBridge routing rule       | `DisableRule`                   | ✅ `EnableRule` |
 
 ### Safety Guardrails
