@@ -181,7 +181,7 @@ npm run dev
 
 ## 💰 Cost Safety & Guardrails `[Real AWS]`
 
-SDRS resources use pay-per-use on-demand serverless pricing (< $0.01 per experiment). To ensure complete cost protection, configure an AWS budget alarm:
+SDRS is designed to use low-cost serverless resources, but actual AWS charges vary with usage, region, telemetry volume, and multi-region configuration. Always configure an AWS Budget and verify resources are removed after testing. To ensure complete cost protection, configure an AWS budget alarm:
 
 ```bash
 aws budgets create-budget \
